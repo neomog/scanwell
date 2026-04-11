@@ -38,6 +38,7 @@ class ProductContributionResource extends JsonResource
             'review_notes' => $this->review_notes,
             'reviewed_at' => $this->reviewed_at,
             'created_at' => $this->created_at,
+            'updated_at' => $this->updated_at,
         ];
     }
 }

@@ -2,65 +2,70 @@
 
 namespace App\Http\Controllers;
 
+use Google_Client;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
-use Laravel\Socialite\Facades\Socialite;
-use Exception;
 
 class SocialAuthController extends Controller
 {
-    /**
-     * Redirect to provider for authentication
-     */
-    public function redirectToProvider(Request $request, $provider)
+    public function googleAuth(Request $request)
     {
-        $redirect = $request->get('redirect');
+        $request->validate([
+            'token' => 'required|string'
+        ]);
 
-        return Socialite::driver($provider)
-            ->stateless()
-            ->with([
-                'state' => base64_encode($redirect),
-            ])
-            ->redirect();
-    }
+//        $client = new Google_Client([
+//            'client_id' => config('services.google.client_id')
+//        ]);
+        $client = new Google_Client([
+            'client_id' => [
+                config('services.google.expo_client_id'),
+                config('services.google.android_client_id'),
+//                config('services.google.ios_client_id'),
+            ]
+        ]);
 
-    /**
-     * Handle provider callback
-     */
-    public function handleProviderCallback(Request $request, $provider)
-    {
-        try {
-            $socialUser = Socialite::driver($provider)->stateless()->user();
+        $payload = $client->verifyIdToken($request->token);
 
-            // Get redirect from state
-            $state = $request->get('state');
-            $redirect = $state ? base64_decode($state) : 'scanwellapp://auth/callback';
-
-            // Create or update user
-            $user = User::updateOrCreate(
-                ['email' => $socialUser->getEmail()],
-                [
-                    'name' => $socialUser->getName(),
-                    'provider' => $provider,
-                    'provider_id' => $socialUser->getId(),
-                    'avatar' => $socialUser->getAvatar(),
-                    'email_verified_at' => now(),
-                    'password' => Hash::make(Str::random(24)),
-                ]
-            );
-
-            $token = $user->createToken('auth_token')->plainTextToken;
-
-            return redirect($redirect . '?token=' . urlencode($token));
-
-        } catch (Exception $e) {
-
-            $state = $request->get('state');
-            $redirect = $state ? base64_decode($state) : 'scanwellapp://auth/callback';
-
-            return redirect($redirect . '?error=' . urlencode($e->getMessage()));
+        if (!$payload) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid Google token'
+            ], 401);
         }
+
+// 🔥 Unified login + registration + linking
+        $user = User::where('email', $payload['email'])->first();
+
+        if ($user) {
+// Link Google if not linked
+            if (!$user->provider_id) {
+                $user->update([
+                    'provider' => 'google',
+                    'provider_id' => $payload['sub'],
+                ]);
+            }
+        } else {
+            $user = User::create([
+                'name' => $payload['name'] ?? explode('@', $payload['email'])[0],
+                'email' => $payload['email'],
+                'provider' => 'google',
+                'provider_id' => $payload['sub'],
+                'avatar' => $payload['picture'] ?? null,
+                'email_verified_at' => now(),
+                'password' => bcrypt(Str::random(24)),
+            ]);
+        }
+
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'token' => $token,
+                'user' => $user
+            ]
+        ]);
     }
 }

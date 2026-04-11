@@ -31,8 +31,9 @@ Route::middleware('auth:sanctum', 'verified')->group(function () {
 
 // oauth routes
 Route::prefix('auth')->group(function () {
-    Route::get('/{provider}/redirect', [SocialAuthController::class, 'redirectToProvider']);
-    Route::get('/{provider}/callback', [SocialAuthController::class, 'handleProviderCallback']);
+    Route::post('/auth/google', [SocialAuthController::class, 'googleAuth']);
+//    Route::get('/{provider}/redirect', [SocialAuthController::class, 'redirectToProvider']);
+//    Route::get('/{provider}/callback', [SocialAuthController::class, 'handleProviderCallback']);
 });
 
 //Route::prefix('v1')->group(function () {
