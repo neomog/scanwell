@@ -18,9 +18,9 @@ Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
 // Protected routes
 Route::middleware('auth:sanctum', 'verified')->group(function () {
-    Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
-        ->middleware('signed')
-        ->name('verification.verify');
+//    Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
+//        ->middleware('signed')
+//        ->name('verification.verify');
     Route::post('/email/resend', [AuthController::class, 'resendVerification']);
 
     Route::get('/user', [AuthController::class, 'user']);
@@ -31,7 +31,8 @@ Route::middleware('auth:sanctum', 'verified')->group(function () {
 
 // oauth routes
 Route::prefix('auth')->group(function () {
-    Route::post('/auth/google', [SocialAuthController::class, 'googleAuth']);
+//    Route::post('/google', [SocialAuthController::class, 'googleAuth']);
+    Route::post('/google', [SocialAuthController::class, 'googleMobileAuth']);
 //    Route::get('/{provider}/redirect', [SocialAuthController::class, 'redirectToProvider']);
 //    Route::get('/{provider}/callback', [SocialAuthController::class, 'handleProviderCallback']);
 });

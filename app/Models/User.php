@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -12,7 +13,7 @@ use Laravel\Sanctum\HasApiTokens;
 class User extends Authenticatable implements MustVerifyEmail
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasApiTokens, HasUuids, HasFactory, Notifiable;
+    use HasApiTokens, HasUuids, HasFactory, Notifiable, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.
@@ -27,7 +28,8 @@ class User extends Authenticatable implements MustVerifyEmail
         'email_verified_at',
         'provider',
         'provider_id',
-        'avatar'
+        'avatar',
+        'role'
     ];
 
     /**
@@ -63,4 +65,25 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         return $this->favoriteProducts()->where('product_id', $product->id)->exists();
     }
+
+    public function isBanned(): bool
+    {
+        return cache()->has("user_banned_{$this->id}");
+    }
+
+    public function getBanInfo(): ?array
+    {
+        return cache()->get("user_banned_{$this->id}");
+    }
+
+    public function scans()
+    {
+        return $this->hasMany(Scan::class);
+    }
+
+    public function contributions()
+    {
+        return $this->hasMany(ProductContribution::class);
+    }
+
 }
