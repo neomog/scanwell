@@ -30,7 +30,11 @@ class ProcessProductScan implements ShouldQueue
                 $this->scan->user_id
             );
 
-            $this->scan->markAsCompleted($product);
+            $this->scan->markAsCompleted($product, [
+                'matched_provider' => data_get($product->raw_data, '_scanwell.source'),
+                'product_family' => $product->product_family,
+                'confidence' => data_get($product->raw_data, '_scanwell.confidence'),
+            ]);
 
             Log::info('Scan processed successfully', [
                 'scan_id' => $this->scan->id,

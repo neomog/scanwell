@@ -44,11 +44,12 @@ class Scan extends Model
         return $this->belongsTo(Product::class);
     }
 
-    public function markAsCompleted(Product $product): void
+    public function markAsCompleted(Product $product, array $metadata = []): void
     {
         $this->update([
             'product_id' => $product->id,
             'status' => 'completed',
+            'scan_metadata' => array_merge($this->scan_metadata ?? [], $metadata),
         ]);
     }
 

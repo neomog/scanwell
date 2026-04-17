@@ -2,53 +2,40 @@
 
 namespace App\Services;
 
-use App\Models\Product;
-use App\Models\Ingredient;
+use App\Models\CosmeticScore;
 use App\Models\FoodNutrition;
 use App\Models\FoodScore;
-use App\Models\CosmeticScore;
-use App\Models\Scan;
+use App\Models\Ingredient;
+use App\Models\Product;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Exception;
 
 class ProductAnalysisService
 {
-    protected OpenFoodFactsService $openFoodFactsService;
-    protected ScoreCalculationService $scoreCalculationService;
-
     public function __construct(
-        OpenFoodFactsService $openFoodFactsService,
-        ScoreCalculationService $scoreCalculationService
+        protected ProductCatalogService $productCatalogService,
+        protected ProductFamilyResolver $productFamilyResolver,
+        protected ScoreCalculationService $scoreCalculationService
     ) {
-        $this->openFoodFactsService = $openFoodFactsService;
-        $this->scoreCalculationService = $scoreCalculationService;
     }
 
     /**
-     * Analyze product by barcode
+     * Analyze product by barcode.
      */
     public function analyzeByBarcode(string $barcode, ?string $userId = null): Product
     {
-        return DB::transaction(function () use ($barcode, $userId) {
-            // Check if product exists in database
+        return DB::transaction(function () use ($barcode) {
             $product = Product::with(['ingredients', 'nutrition', 'foodScore', 'cosmeticScore'])
                 ->where('barcode', $barcode)
                 ->first();
 
             if ($product) {
-                // Update existing product if data is stale (e.g., older than 30 days)
-                if ($product->updated_at->diffInDays(now()) > 30) {
+                if ($this->shouldRefreshProduct($product)) {
                     $this->updateProductFromApi($product);
                 }
             } else {
-                // Fetch from API and create new product
                 $product = $this->createProductFromApi($barcode);
-            }
-
-            // Record scan if user is authenticated
-            if ($userId) {
-                $this->recordScan($userId, $product);
             }
 
             return $product->load(['ingredients', 'nutrition', 'foodScore', 'cosmeticScore']);
@@ -56,232 +43,321 @@ class ProductAnalysisService
     }
 
     /**
-     * Create new product from API data
+     * Create new product from external catalog data.
      */
-    protected function createProductFromApi(string $barcode): Product
-{
-    $apiData = $this->openFoodFactsService->getProductByBarcode($barcode);
+    public function createProductFromApi(string $barcode): Product
+    {
+        $catalogData = $this->productCatalogService->findByBarcode($barcode);
 
-    if (!$apiData) {
-        throw new Exception("Product not found with barcode: {$barcode}");
+        if (!$catalogData) {
+            throw new Exception("Product not found with barcode: {$barcode}", 404);
+        }
+
+        $productFamily = $this->productFamilyResolver->resolveFromNormalized($catalogData);
+        $categoryId = $catalogData['category_id']
+            ?? $this->productFamilyResolver->categoryIdForFamily($productFamily, $catalogData);
+
+        $product = Product::create([
+            'barcode' => $catalogData['barcode'],
+            'name' => $catalogData['name'],
+            'brand' => $catalogData['brand'],
+            'category_id' => $categoryId,
+            'image_url' => $catalogData['image_url'],
+            'source' => $catalogData['source'],
+            'raw_data' => $this->buildStoredRawData($catalogData, $productFamily),
+        ]);
+
+        if (!empty($catalogData['ingredients'])) {
+            $this->processIngredients($product, $catalogData['ingredients']);
+        }
+
+        if (
+            $this->productFamilyResolver->supportsFoodScore($productFamily)
+            && $this->hasMeaningfulNutrition($catalogData['nutrition'] ?? [])
+        ) {
+            $this->addNutritionData($product, $catalogData['nutrition']);
+        }
+
+        $this->calculateScores($product);
+
+        return $product->load(['ingredients', 'nutrition', 'foodScore', 'cosmeticScore']);
     }
-
-    // Determine product type and adjust category if needed
-    $productType = $apiData['product_type'] ?? 'food';
-    $categoryId = $apiData['category_id'];
-
-    // Ensure beauty products get higher category IDs
-    if ($productType === 'beauty' && $categoryId < 100) {
-        $categoryId = 100 + ($categoryId % 100); // Map to 100+ range
-    }
-
-    // Create product
-    $product = Product::create([
-        'barcode' => $apiData['barcode'],
-        'name' => $apiData['name'],
-        'brand' => $apiData['brand'],
-        'category_id' => $categoryId,
-        'image_url' => $apiData['image_url'],
-        'source' => $apiData['source'],
-        'raw_data' => $apiData['raw_data'],
-    ]);
-
-    // Process ingredients (if any)
-    if (!empty($apiData['ingredients'])) {
-        $this->processIngredients($product, $apiData['ingredients']);
-    }
-
-    // Add nutrition data only for food products
-    if ($productType === 'food' && !empty($apiData['nutrition'])) {
-        $this->addNutritionData($product, $apiData['nutrition']);
-    }
-
-    // Calculate scores based on product type
-    $this->calculateScores($product);
-
-    return $product;
-}
 
     /**
-     * Update existing product with fresh API data
+     * Update existing product with fresh vendor data.
      */
     protected function updateProductFromApi(Product $product): void
     {
         try {
-            $apiData = $this->openFoodFactsService->getProductByBarcode($product->barcode);
+            $catalogData = $this->productCatalogService->findByBarcode($product->barcode);
 
-            if ($apiData) {
-                $product->update([
-                    'name' => $apiData['name'],
-                    'brand' => $apiData['brand'],
-                    'category_id' => $apiData['category_id'],
-                    'image_url' => $apiData['image_url'],
-                    'raw_data' => $apiData['raw_data'],
-                ]);
-
-                // Update ingredients
-                DB::table('product_ingredients')->where('product_id', $product->id)->delete();
-                $this->processIngredients($product, $apiData['ingredients'] ?? []);
-
-                // Update nutrition
-                if (!empty($apiData['nutrition'])) {
-                    $this->updateNutritionData($product, $apiData['nutrition']);
-                }
-
-                // Recalculate scores
-                $this->calculateScores($product);
+            if (!$catalogData) {
+                return;
             }
-        } catch (Exception $e) {
-            Log::error('Failed to update product from API', [
+
+            $productFamily = $this->productFamilyResolver->resolveFromNormalized($catalogData);
+            $categoryId = $catalogData['category_id']
+                ?? $this->productFamilyResolver->categoryIdForFamily($productFamily, $catalogData);
+
+            $product->update([
+                'name' => $catalogData['name'],
+                'brand' => $catalogData['brand'],
+                'category_id' => $categoryId,
+                'image_url' => $catalogData['image_url'],
+                'source' => $catalogData['source'],
+                'raw_data' => $this->buildStoredRawData($catalogData, $productFamily),
+            ]);
+
+            DB::table('product_ingredients')->where('product_id', $product->id)->delete();
+            $this->processIngredients($product, $catalogData['ingredients'] ?? []);
+
+            if ($this->productFamilyResolver->supportsFoodScore($productFamily)) {
+                $this->updateNutritionData($product, $catalogData['nutrition'] ?? []);
+            } elseif ($product->nutrition) {
+                $product->nutrition()->delete();
+            }
+
+            $this->calculateScores($product->fresh(['ingredients', 'nutrition']));
+        } catch (\Throwable $exception) {
+            Log::error('Failed to update product from catalog', [
                 'product_id' => $product->id,
                 'barcode' => $product->barcode,
-                'error' => $e->getMessage()
+                'error' => $exception->getMessage(),
             ]);
         }
     }
 
-    /**
-     * Process and link ingredients
-     */
     protected function processIngredients(Product $product, array $ingredientsData): void
     {
+        $syncPayload = [];
+
         foreach ($ingredientsData as $ingredientData) {
+            $ingredientName = trim((string) ($ingredientData['name'] ?? ''));
+
+            if ($ingredientName === '') {
+                continue;
+            }
+
             $ingredient = Ingredient::firstOrCreate(
-                ['name' => $ingredientData['name']],
+                ['name' => $ingredientName],
                 [
-                    'category' => $this->determineIngredientCategory($ingredientData['name']),
-                    'risk_level' => $this->determineRiskLevel($ingredientData['name']),
+                    'category' => $this->determineIngredientCategory($ingredientName),
+                    'risk_level' => $this->determineRiskLevel($ingredientName),
                 ]
             );
 
-            $product->ingredients()->attach($ingredient->id);
+            $syncPayload[$ingredient->id] = [
+                'percentage' => $ingredientData['percent'] ?? $ingredientData['percentage'] ?? null,
+                'is_additive' => $this->looksLikeAdditive($ingredientName),
+                'origin' => $ingredientData['origin'] ?? null,
+            ];
+        }
+
+        if ($syncPayload !== []) {
+            $product->ingredients()->syncWithoutDetaching($syncPayload);
         }
     }
 
-    /**
-     * Add nutrition data
-     */
     protected function addNutritionData(Product $product, array $nutritionData): void
     {
-        FoodNutrition::create([
-            'product_id' => $product->id,
-            'calories' => $nutritionData['calories'],
-            'fat' => $nutritionData['fat'],
-            'saturated_fat' => $nutritionData['saturated_fat'],
-            'sugars' => $nutritionData['sugars'],
-            'carbohydrates' => $nutritionData['carbohydrates'],
-//            'salt' => $nutritionData['salt'],
-            'protein' => $nutritionData['protein'],
-            'fiber' => $nutritionData['fiber'],
-            'sodium' => $nutritionData['sodium'],
-        ]);
+        FoodNutrition::updateOrCreate(
+            ['product_id' => $product->id],
+            [
+                'calories' => $nutritionData['calories'] ?? null,
+                'fat' => $nutritionData['fat'] ?? null,
+                'saturated_fat' => $nutritionData['saturated_fat'] ?? null,
+                'sugars' => $nutritionData['sugars'] ?? null,
+                'carbohydrates' => $nutritionData['carbohydrates'] ?? null,
+                'protein' => $nutritionData['protein'] ?? null,
+                'fiber' => $nutritionData['fiber'] ?? null,
+                'sodium' => $nutritionData['sodium'] ?? null,
+                'serving_size' => $nutritionData['serving_size'] ?? null,
+            ]
+        );
     }
 
-    /**
-     * Update nutrition data
-     */
     protected function updateNutritionData(Product $product, array $nutritionData): void
     {
-        if ($product->nutrition) {
-            $product->nutrition->update($nutritionData);
-        } else {
-            $this->addNutritionData($product, $nutritionData);
+        if (!$this->hasMeaningfulNutrition($nutritionData)) {
+            if ($product->nutrition) {
+                $product->nutrition()->delete();
+            }
+
+            return;
         }
+
+        $this->addNutritionData($product, $nutritionData);
     }
 
-    /**
-     * Calculate and save scores
-     */
     protected function calculateScores(Product $product): void
-{
-    $rawData = $product->raw_data;
-    $productType = $rawData['product_type'] ?? 'food';
-
-    if ($productType === 'food' || $product->isFood()) {
-        $scores = $this->scoreCalculationService->calculateFoodScores($product);
-
-        FoodScore::updateOrCreate(
-            ['product_id' => $product->id],
-            [
-                'overall_score' => $scores['overall'],
-                'nutrition_score' => $scores['nutrition'],
-                'ingredient_score' => $scores['ingredient'] ?? 50,
-                'additive_score' => $scores['additive'],
-                'processing_score' => $scores['processing'],
-                'explanation_text' => $scores['explanation'],
-                'calculated_at' => now(),
-            ]
-        );
-    } elseif ($productType === 'beauty' || $product->isCosmetic()) {
-        $scores = $this->scoreCalculationService->calculateCosmeticScores($product);
-
-        CosmeticScore::updateOrCreate(
-            ['product_id' => $product->id],
-            [
-                'overall_score' => $scores['overall'],
-                'irritant_score' => $scores['irritant'],
-                'endocrine_score' => $scores['endocrine'],
-                'allergen_score' => $scores['allergen'] ?? 50,
-                'environmental_score' => $scores['environmental'] ?? 50,
-                'explanation_text' => $scores['explanation'],
-                'calculated_at' => now(),
-            ]
-        );
-    }
-}
-
-    /**
-     * Record scan in database
-     */
-    protected function recordScan(string $userId, Product $product): void
     {
-        Scan::create([
-            'user_id' => $userId,
-            'product_id' => $product->id,
-            'barcode' => $product->barcode,
-            'scan_timestamp' => now(),
-            'status' => 'completed',
-            'scan_metadata' => [
-                'source' => $product->source,
-                'device_type' => request()->userAgent(),
-            ],
-        ]);
+        $productFamily = $this->productFamilyResolver->resolveFromProduct($product);
+
+        if ($this->productFamilyResolver->supportsFoodScore($productFamily)) {
+            $scores = $this->scoreCalculationService->calculateFoodScores($product);
+
+            FoodScore::updateOrCreate(
+                ['product_id' => $product->id],
+                [
+                    'overall_score' => $scores['overall'],
+                    'nutrition_score' => $scores['nutrition'],
+                    'ingredient_score' => $scores['ingredient'],
+                    'additive_score' => $scores['additive'],
+                    'processing_score' => $scores['processing'],
+                    'nova_group' => $scores['nova_group'],
+                    'nutriscore_grade' => $scores['nutriscore_grade'],
+                    'score_breakdown' => $scores['score_breakdown'],
+                    'explanation_text' => $scores['explanation'],
+                    'warnings' => $scores['warnings'],
+                    'benefits' => $scores['benefits'],
+                    'calculated_at' => now(),
+                ]
+            );
+
+            $product->cosmeticScore()->delete();
+
+            return;
+        }
+
+        if ($this->productFamilyResolver->supportsCosmeticScore($productFamily)) {
+            $scores = $this->scoreCalculationService->calculateCosmeticScores($product);
+
+            CosmeticScore::updateOrCreate(
+                ['product_id' => $product->id],
+                [
+                    'overall_score' => $scores['overall'],
+                    'irritant_score' => $scores['irritant'],
+                    'endocrine_score' => $scores['endocrine'],
+                    'allergen_score' => $scores['allergen'],
+                    'environmental_score' => $scores['environmental'],
+                    'score_breakdown' => $scores['score_breakdown'],
+                    'explanation_text' => $scores['explanation'],
+                    'warnings' => $scores['warnings'],
+                    'benefits' => $scores['benefits'],
+                    'skin_types_suitable' => $scores['skin_types_suitable'],
+                    'calculated_at' => now(),
+                ]
+            );
+
+            $product->foodScore()->delete();
+
+            return;
+        }
+
+        $product->foodScore()->delete();
+        $product->cosmeticScore()->delete();
     }
 
-    /**
-     * Determine ingredient category (simplified)
-     */
+    protected function shouldRefreshProduct(Product $product): bool
+    {
+        if (!$product->updated_at) {
+            return false;
+        }
+
+        $externalSources = array_map(
+            fn (array $source): string => $source['key'],
+            config('scanning.open_food_facts.sources', [])
+        );
+
+        if (!in_array($product->source, $externalSources, true)) {
+            return false;
+        }
+
+        return $product->updated_at->diffInDays(now()) > config('scanning.stale_after_days', 30);
+    }
+
+    protected function buildStoredRawData(array $catalogData, string $productFamily): array
+    {
+        $rawData = $catalogData['raw_data'] ?? [];
+        $rawData['_scanwell'] = [
+            'provider' => $catalogData['provider'] ?? null,
+            'source' => $catalogData['source'] ?? null,
+            'product_family' => $productFamily,
+            'confidence' => $catalogData['confidence'] ?? null,
+            'completeness' => $catalogData['completeness'] ?? null,
+            'matched_by' => 'barcode_exact',
+            'packaging' => $catalogData['packaging'] ?? [],
+            'warnings' => $catalogData['warnings'] ?? [],
+            'resolved_at' => now()->toIso8601String(),
+        ];
+
+        return $rawData;
+    }
+
     protected function determineIngredientCategory(string $ingredientName): string
     {
         $ingredientName = strtolower($ingredientName);
 
-        if (str_contains($ingredientName, 'sugar') || str_contains($ingredientName, 'syrup')) {
+        if (str_contains($ingredientName, 'sugar') || str_contains($ingredientName, 'syrup') || str_contains($ingredientName, 'sweetener')) {
             return 'sweetener';
-        } elseif (str_contains($ingredientName, 'oil') || str_contains($ingredientName, 'fat')) {
+        }
+
+        if (str_contains($ingredientName, 'oil') || str_contains($ingredientName, 'fat') || str_contains($ingredientName, 'butter')) {
             return 'fat';
-        } elseif (str_contains($ingredientName, 'preservative')) {
+        }
+
+        if (str_contains($ingredientName, 'preserv')) {
             return 'preservative';
+        }
+
+        if (str_contains($ingredientName, 'color') || preg_match('/\be\d{3}\b/i', $ingredientName)) {
+            return 'additive';
         }
 
         return 'other';
     }
 
-    /**
-     * Determine risk level (simplified)
-     */
     protected function determineRiskLevel(string $ingredientName): string
     {
         $ingredientName = strtolower($ingredientName);
 
-        $highRisk = ['aspartame', 'saccharin', 'msg', 'sodium nitrite'];
-        $mediumRisk = ['high fructose corn syrup', 'partially hydrogenated'];
+        $highRiskKeywords = [
+            'aspartame', 'saccharin', 'msg', 'monosodium glutamate', 'sodium nitrite',
+            'potassium bromate', 'bha', 'bht', 'red 40', 'yellow 5', 'blue 1',
+            'triclosan', 'phthalate', 'paraben',
+        ];
 
-        if (in_array($ingredientName, $highRisk)) {
-            return 'high';
-        } elseif (in_array($ingredientName, $mediumRisk)) {
-            return 'medium';
+        foreach ($highRiskKeywords as $keyword) {
+            if (str_contains($ingredientName, $keyword)) {
+                return 'high';
+            }
+        }
+
+        $mediumRiskKeywords = [
+            'high fructose corn syrup', 'partially hydrogenated', 'carrageenan',
+            'sodium benzoate', 'potassium sorbate', 'fragrance', 'parfum',
+        ];
+
+        foreach ($mediumRiskKeywords as $keyword) {
+            if (str_contains($ingredientName, $keyword)) {
+                return 'medium';
+            }
         }
 
         return 'low';
+    }
+
+    protected function looksLikeAdditive(string $ingredientName): bool
+    {
+        $ingredientName = strtolower($ingredientName);
+
+        foreach (['lecithin', 'emulsifier', 'preserv', 'color', 'flavor', 'flavour', 'stabilizer'] as $keyword) {
+            if (str_contains($ingredientName, $keyword)) {
+                return true;
+            }
+        }
+
+        return (bool) preg_match('/\be\d{3}\b/i', $ingredientName);
+    }
+
+    protected function hasMeaningfulNutrition(array $nutritionData): bool
+    {
+        foreach ($nutritionData as $value) {
+            if ($value !== null && $value !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

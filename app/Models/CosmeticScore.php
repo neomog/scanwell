@@ -44,6 +44,17 @@ class CosmeticScore extends Model
     {
         return $this->belongsTo(Product::class, 'product_id');
     }
+
+    public function getSafetyLevelAttribute(): string
+    {
+        return match (true) {
+            $this->overall_score >= 80 => 'Excellent',
+            $this->overall_score >= 60 => 'Good',
+            $this->overall_score >= 40 => 'Moderate',
+            $this->overall_score >= 20 => 'Poor',
+            default => 'Avoid',
+        };
+    }
 }
 //
 //namespace App\Models;

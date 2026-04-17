@@ -8,7 +8,6 @@ use App\Http\Resources\ProductResource;
 use App\Http\Resources\ProductContributionResource;
 use App\Models\Product;
 use App\Models\UserPreference;
-use App\Services\OpenFoodFactsService;
 use App\Services\ProductAnalysisService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,15 +17,64 @@ use Illuminate\Support\Facades\Validator;
 
 class ProductController extends Controller
 {
-    protected OpenFoodFactsService $openFoodFactsService;
     protected ProductAnalysisService $analysisService;
 
-    public function __construct(
-        OpenFoodFactsService $openFoodFactsService,
-        ProductAnalysisService $analysisService
-    ) {
-        $this->openFoodFactsService = $openFoodFactsService;
+    public function __construct(ProductAnalysisService $analysisService)
+    {
         $this->analysisService = $analysisService;
+    }
+
+    /**
+     * Search products by barcode, name, or brand.
+     */
+    public function search(ProductSearchRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+        $query = trim($validated['query']);
+        $page = (int) ($validated['page'] ?? 1);
+        $perPage = (int) ($validated['per_page'] ?? 20);
+
+        $products = Product::with(['ingredients', 'nutrition', 'foodScore', 'cosmeticScore'])
+            ->where('barcode', $query)
+            ->orWhere('barcode', 'like', "{$query}%")
+            ->orWhere('name', 'like', "%{$query}%")
+            ->orWhere('brand', 'like', "%{$query}%")
+            ->orderByRaw('CASE WHEN barcode = ? THEN 0 ELSE 1 END', [$query])
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        if ($products->total() === 0 && preg_match('/^[0-9]{8,13}$/', $query)) {
+            try {
+                $product = $this->analysisService
+                    ->analyzeByBarcode($query)
+                    ->load(['ingredients', 'nutrition', 'foodScore', 'cosmeticScore']);
+
+                return response()->json([
+                    'success' => true,
+                    'data' => ProductResource::collection(collect([$product])),
+                    'meta' => [
+                        'total' => 1,
+                        'per_page' => 1,
+                        'current_page' => 1,
+                        'last_page' => 1,
+                    ],
+                ]);
+            } catch (\Exception $e) {
+                if ($e->getCode() !== 404) {
+                    throw $e;
+                }
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => ProductResource::collection($products),
+            'meta' => [
+                'total' => $products->total(),
+                'per_page' => $products->perPage(),
+                'current_page' => $products->currentPage(),
+                'last_page' => $products->lastPage(),
+            ],
+        ]);
     }
 
     /**
@@ -35,8 +83,7 @@ class ProductController extends Controller
     public function findByBarcode(string $barcode): JsonResponse
     {
         try {
-            // Try to find in local database first
-            $product = Product::with([
+            $product = $this->analysisService->analyzeByBarcode($barcode)->load([
                 'ingredients',
                 'nutrition',
                 'foodScore',
@@ -44,23 +91,7 @@ class ProductController extends Controller
                 'alternatives' => function ($query) {
                     $query->with(['foodScore', 'cosmeticScore'])->limit(3);
                 }
-            ])->where('barcode', $barcode)->first();
-
-            if (!$product) {
-                // Fetch from OpenFoodFacts
-                $apiData = $this->openFoodFactsService->getProductByBarcode($barcode);
-
-                if (!$apiData) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Product not found',
-                        'data' => null
-                    ], 404);
-                }
-
-                // Create product from API data
-                $product = $this->analysisService->createProductFromApi($barcode);
-            }
+            ]);
 
             // Get personalized warnings based on user preferences
             $personalizedWarnings = [];
@@ -78,6 +109,14 @@ class ProductController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            if ($e->getCode() === 404) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Product not found',
+                    'data' => null,
+                ], 404);
+            }
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching product',

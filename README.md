@@ -1,3 +1,19 @@
+## Scanwell Backend
+
+The barcode scanning engine was redesigned to make vendor matches stricter and scores more conservative without changing the mobile API contract.
+
+Start here:
+
+- [Scan Engine Documentation](docs/scanning-engine.md)
+
+What changed:
+
+- exact barcode resolution across multiple Open Facts databases
+- product-family detection for food, cosmetics, household, pet food, and general products
+- conservative scoring for sparse data
+- bottled-water plastic packaging penalty
+- provider-based architecture so more vendors can be added later
+
 <p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 
 <p align="center">

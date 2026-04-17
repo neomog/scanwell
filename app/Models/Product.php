@@ -84,12 +84,29 @@ class Product extends Model
 
     public function isFood(): bool
     {
-        return $this->category_id >= 1 && $this->category_id <= 100; // Adjust based on your categories
+        return $this->product_family === 'food';
     }
 
     public function isCosmetic(): bool
     {
-        return $this->category_id >= 101; // Adjust based on your categories
+        return $this->product_family === 'cosmetic';
+    }
+
+    public function getProductFamilyAttribute(): string
+    {
+        $storedFamily = data_get($this->raw_data, '_scanwell.product_family');
+
+        if (is_string($storedFamily) && $storedFamily !== '') {
+            return $storedFamily;
+        }
+
+        return match (true) {
+            $this->category_id >= 100 && $this->category_id < 200 => 'cosmetic',
+            $this->category_id >= 300 && $this->category_id < 400 => 'pet_food',
+            $this->category_id >= 400 && $this->category_id < 500 => 'household',
+            $this->category_id >= 900 => 'general',
+            default => 'food',
+        };
     }
 
     public function getScoreAttribute(): ?float

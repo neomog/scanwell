@@ -13,7 +13,6 @@ use App\Services\ProductAnalysisService;
 use Error;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Exception;
 
 class ScanController extends Controller
@@ -50,13 +49,14 @@ class ScanController extends Controller
             ]);
 
             // Analyze product
-            $product = $this->analysisService->analyzeByBarcode(
-                $barcode,
-                Auth::id()
-            );
+            $product = $this->analysisService->analyzeByBarcode($barcode, Auth::id());
 
             // Update scan with product
-            $scan->markAsCompleted($product);
+            $scan->markAsCompleted($product, [
+                'matched_provider' => data_get($product->raw_data, '_scanwell.source'),
+                'product_family' => $product->product_family,
+                'confidence' => data_get($product->raw_data, '_scanwell.confidence'),
+            ]);
 
             // Get personalized warnings
             $personalizedWarnings = [];
@@ -69,9 +69,9 @@ class ScanController extends Controller
 
             // Find alternatives if product score is low
             $alternatives = null;
-            $score = $product->foodScore->overall_score ?? $product->cosmeticScore->overall_score ?? 100;
+            $score = $product->foodScore->overall_score ?? $product->cosmeticScore->overall_score;
 
-            if ($score < 50) {
+            if ($score !== null && $score < 50) {
                 $alternatives = $this->findAlternatives($product);
             }
 
@@ -83,7 +83,7 @@ class ScanController extends Controller
                     'product' => new ProductResource($product),
                     'personalized_warnings' => $personalizedWarnings,
                     'alternatives' => $alternatives ? ProductResource::collection($alternatives) : [],
-                    'score_interpretation' => $this->interpretScore($score),
+                    'score_interpretation' => $this->interpretScore($score, $product),
                 ],
             ]);
 
@@ -181,30 +181,44 @@ class ScanController extends Controller
     /**
      * Interpret score in human-readable format
      */
-    protected function interpretScore(float $score): array
+    protected function interpretScore(?float $score, ?Product $product = null): array
     {
+        if ($score === null) {
+            return [
+                'grade' => 'Unknown',
+                'description' => 'We found the product, but there is not enough verified data to score this category confidently yet.',
+                'color' => 'gray',
+            ];
+        }
+
+        $isCosmetic = $product?->isCosmetic() ?? false;
+
         if ($score >= 80) {
             return [
                 'grade' => 'Excellent',
-                'description' => 'This is a very healthy product with minimal concerns.',
+                'description' => $isCosmetic
+                    ? 'This product has a strong safety profile with limited flagged concerns.'
+                    : 'This product scores strongly with limited flagged concerns.',
                 'color' => 'green',
             ];
         } elseif ($score >= 60) {
             return [
                 'grade' => 'Good',
-                'description' => 'This product has good quality with some minor concerns.',
+                'description' => $isCosmetic
+                    ? 'This product has a generally good safety profile with some minor concerns.'
+                    : 'This product has a generally good profile with some minor concerns.',
                 'color' => 'lightgreen',
             ];
         } elseif ($score >= 40) {
             return [
                 'grade' => 'Moderate',
-                'description' => 'This product is average. Consider checking the ingredients list.',
+                'description' => 'This product is average. Check the detailed warnings before relying on it regularly.',
                 'color' => 'yellow',
             ];
         } elseif ($score >= 20) {
             return [
                 'grade' => 'Poor',
-                'description' => 'This product has several concerns. Look for healthier alternatives.',
+                'description' => 'This product has several concerns. Consider better-scoring alternatives.',
                 'color' => 'orange',
             ];
         } else {
