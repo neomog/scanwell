@@ -15,7 +15,7 @@ class WebAuth
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $token = Session::get('api_token');
+        $token = \Session::get('api_token');
 
         if (!$token) {
             return redirect()->route('web.login');
