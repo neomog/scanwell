@@ -53,9 +53,9 @@
         </a>
 
         <!-- Products -->
-        <a href="#"
+        <a href="{{ route('admin.products.index') }}"
            class="flex items-center gap-3 px-3 py-2 rounded-lg transition
-           {{ request()->routeIs('products.*')
+           {{ request()->routeIs('admin.products.*')
                 ? 'bg-gray-200 text-gray-900 font-semibold'
                 : 'text-gray-600 hover:bg-gray-100' }}">
 
@@ -81,9 +81,9 @@
 
 {{--            <span x-show="sidebarOpen">Contributions</span>--}}
 {{--        </a>--}}
-        <a href="#"
+        <a href="{{ route('admin.contributions.index') }}"
            class="flex items-center justify-between px-3 py-2 rounded-lg transition
-   {{ request()->routeIs('contributions.*')
+   {{ request()->routeIs('admin.contributions.*')
         ? 'bg-gray-200 text-gray-900 font-semibold'
         : 'text-gray-600 hover:bg-gray-100' }}">
 
@@ -107,6 +107,20 @@
             {{ pendingContributions() }}
         </span>
             @endif
+        </a>
+
+        <a href="{{ route('admin.leaderboard.index') }}"
+           class="flex items-center gap-3 px-3 py-2 rounded-lg transition
+           {{ request()->routeIs('admin.leaderboard.*')
+                ? 'bg-gray-200 text-gray-900 font-semibold'
+                : 'text-gray-600 hover:bg-gray-100' }}">
+
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M8 21h8M12 17v4M7 4h10l-1 6a4 4 0 01-4 3 4 4 0 01-4-3L7 4z"/>
+            </svg>
+
+            <span x-show="sidebarOpen">Leaderboard</span>
         </a>
 
         <!-- Settings -->

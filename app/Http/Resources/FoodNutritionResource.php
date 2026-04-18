@@ -34,9 +34,34 @@ class FoodNutritionResource extends JsonResource
             'minerals' => $this->minerals,
             'serving_size' => $this->serving_size,
             'servings_per_container' => $this->servings_per_container,
-            'health_score' => $this->when($this->resource, function () {
-                return $this->calculateHealthScore();
-            }),
+            'health_score' => $this->when($this->resource, fn () => $this->calculateHealthScore()),
         ];
+    }
+
+    protected function calculateHealthScore(): ?float
+    {
+        $score = 100;
+
+        if (($this->sugars ?? 0) > 10) {
+            $score -= 20;
+        }
+
+        if (($this->saturated_fat ?? 0) > 5) {
+            $score -= 15;
+        }
+
+        if (($this->sodium ?? 0) > 400) {
+            $score -= 15;
+        }
+
+        if (($this->fiber ?? 0) >= 3) {
+            $score += 5;
+        }
+
+        if (($this->protein ?? 0) >= 10) {
+            $score += 5;
+        }
+
+        return max(0, min(100, $score));
     }
 }

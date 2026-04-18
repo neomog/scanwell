@@ -29,7 +29,10 @@ class User extends Authenticatable implements MustVerifyEmail
         'provider',
         'provider_id',
         'avatar',
-        'role'
+        'role',
+        'reputation_points',
+        'approved_contributions_count',
+        'rejected_contributions_count',
     ];
 
     /**
@@ -52,6 +55,9 @@ class User extends Authenticatable implements MustVerifyEmail
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'reputation_points' => 'integer',
+            'approved_contributions_count' => 'integer',
+            'rejected_contributions_count' => 'integer',
         ];
     }
 
@@ -84,6 +90,11 @@ class User extends Authenticatable implements MustVerifyEmail
     public function contributions()
     {
         return $this->hasMany(ProductContribution::class);
+    }
+
+    public function auditLogs()
+    {
+        return $this->hasMany(ProductAuditLog::class, 'actor_id');
     }
 
 }

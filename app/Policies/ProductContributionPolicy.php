@@ -21,4 +21,9 @@ class ProductContributionPolicy
     {
         return $user->role === 'admin';
     }
+
+    public function flag(User $user): bool
+    {
+        return $user->role === 'admin';
+    }
 }

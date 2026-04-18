@@ -2,38 +2,34 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Http\Requests\ScanRequest;
+use App\Http\Resources\ProductContributionResource;
 use App\Http\Resources\ProductResource;
 use App\Http\Resources\ScanResource;
 use App\Models\Product;
 use App\Models\Scan;
 use App\Models\UserPreference;
 use App\Services\ProductAnalysisService;
+use App\Services\ProductContributionService;
 use Error;
+use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
-use Exception;
 
 class ScanController extends Controller
 {
-    protected ProductAnalysisService $analysisService;
-
-    public function __construct(ProductAnalysisService $analysisService)
-    {
-        $this->analysisService = $analysisService;
+    public function __construct(
+        protected ProductAnalysisService $analysisService,
+        protected ProductContributionService $productContributionService
+    ) {
     }
 
-    /**
-     * Scan a product by barcode
-     */
     public function scan(ScanRequest $request): JsonResponse
     {
         try {
             $validated = $request->validated();
             $barcode = $validated['barcode'];
 
-            // Create initial scan record
             $scan = Scan::create([
                 'user_id' => Auth::id(),
                 'barcode' => $barcode,
@@ -48,26 +44,26 @@ class ScanController extends Controller
                 ],
             ]);
 
-            // Analyze product
-            $product = $this->analysisService->analyzeByBarcode($barcode, Auth::id());
+            $product = $this->analysisService
+                ->analyzeByBarcode($barcode, Auth::id())
+                ->load(['ingredients', 'nutrition', 'foodScore', 'cosmeticScore', 'images', 'barcodes']);
 
-            // Update scan with product
             $scan->markAsCompleted($product, [
                 'matched_provider' => data_get($product->raw_data, '_scanwell.source'),
-                'product_family' => $product->product_family,
+                'product_family' => $product->resolved_product_family,
                 'confidence' => data_get($product->raw_data, '_scanwell.confidence'),
             ]);
 
-            // Get personalized warnings
             $personalizedWarnings = [];
+
             if (Auth::check()) {
                 $preferences = UserPreference::where('user_id', Auth::id())->first();
+
                 if ($preferences) {
                     $personalizedWarnings = $preferences->getPersonalizedWarnings($product);
                 }
             }
 
-            // Find alternatives if product score is low
             $alternatives = null;
             $score = $product->foodScore->overall_score ?? $product->cosmeticScore->overall_score;
 
@@ -79,34 +75,44 @@ class ScanController extends Controller
                 'success' => true,
                 'message' => 'Product scanned successfully',
                 'data' => [
-                    'scan' => new ScanResource($scan),
+                    'scan' => new ScanResource($scan->fresh('product')),
                     'product' => new ProductResource($product),
                     'personalized_warnings' => $personalizedWarnings,
                     'alternatives' => $alternatives ? ProductResource::collection($alternatives) : [],
                     'score_interpretation' => $this->interpretScore($score, $product),
                 ],
             ]);
-
         } catch (Exception|Error $e) {
-            // Update scan as failed if it was created
             if (isset($scan)) {
                 $scan->markAsFailed($e->getMessage());
+            }
+
+            if ((int) $e->getCode() === 404) {
+                $pendingContribution = $this->productContributionService->pendingSummaryForBarcode($barcode ?? '');
+
+                return response()->json([
+                    'success' => false,
+                    'message' => $pendingContribution
+                        ? 'Product is not in the catalogue yet. A community submission is pending review.'
+                        : 'Product not found',
+                    'data' => [
+                        'scan' => isset($scan) ? new ScanResource($scan) : null,
+                        'product' => null,
+                        'pending_contribution' => $pendingContribution
+                            ? new ProductContributionResource($pendingContribution)
+                            : null,
+                    ],
+                ], 404);
             }
 
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to scan product',
                 'error' => $e->getMessage(),
-                'error2' => $e->getTraceAsString(),
-                'error3' => $e->getLine(),
-                'error4' => $e->getCode(),
             ], 500);
         }
     }
 
-    /**
-     * Delete a scan from history
-     */
     public function destroy(string $id): JsonResponse
     {
         $scan = Scan::where('user_id', Auth::id())->findOrFail($id);
@@ -118,12 +124,9 @@ class ScanController extends Controller
         ]);
     }
 
-    /**
-     * Get scan history for authenticated user
-     */
     public function history(): JsonResponse
     {
-        $scans = Scan::with(['product', 'product.foodScore', 'product.cosmeticScore'])
+        $scans = Scan::with(['product', 'product.foodScore', 'product.cosmeticScore', 'product.images', 'product.barcodes'])
             ->where('user_id', Auth::id())
             ->orderBy('scan_timestamp', 'desc')
             ->paginate(20);
@@ -140,9 +143,6 @@ class ScanController extends Controller
         ]);
     }
 
-    /**
-     * Get single scan details
-     */
     public function show(string $id): JsonResponse
     {
         $scan = Scan::with([
@@ -150,7 +150,9 @@ class ScanController extends Controller
             'product.ingredients',
             'product.nutrition',
             'product.foodScore',
-            'product.cosmeticScore'
+            'product.cosmeticScore',
+            'product.images',
+            'product.barcodes',
         ])->where('user_id', Auth::id())->findOrFail($id);
 
         return response()->json([
@@ -159,28 +161,22 @@ class ScanController extends Controller
         ]);
     }
 
-    /**
-     * Find alternative products
-     */
     protected function findAlternatives(Product $product): ?object
     {
-        return Product::with(['foodScore', 'cosmeticScore'])
+        return Product::with(['foodScore', 'cosmeticScore', 'images', 'barcodes'])
             ->where('category_id', $product->category_id)
             ->where('id', '!=', $product->id)
             ->where(function ($query) {
-                $query->whereHas('foodScore', function ($q) {
-                    $q->where('overall_score', '>=', 70);
-                })->orWhereHas('cosmeticScore', function ($q) {
-                    $q->where('overall_score', '>=', 70);
+                $query->whereHas('foodScore', function ($scoreQuery) {
+                    $scoreQuery->where('overall_score', '>=', 70);
+                })->orWhereHas('cosmeticScore', function ($scoreQuery) {
+                    $scoreQuery->where('overall_score', '>=', 70);
                 });
             })
             ->limit(3)
             ->get();
     }
 
-    /**
-     * Interpret score in human-readable format
-     */
     protected function interpretScore(?float $score, ?Product $product = null): array
     {
         if ($score === null) {
@@ -201,7 +197,9 @@ class ScanController extends Controller
                     : 'This product scores strongly with limited flagged concerns.',
                 'color' => 'green',
             ];
-        } elseif ($score >= 60) {
+        }
+
+        if ($score >= 60) {
             return [
                 'grade' => 'Good',
                 'description' => $isCosmetic
@@ -209,24 +207,28 @@ class ScanController extends Controller
                     : 'This product has a generally good profile with some minor concerns.',
                 'color' => 'lightgreen',
             ];
-        } elseif ($score >= 40) {
+        }
+
+        if ($score >= 40) {
             return [
                 'grade' => 'Moderate',
                 'description' => 'This product is average. Check the detailed warnings before relying on it regularly.',
                 'color' => 'yellow',
             ];
-        } elseif ($score >= 20) {
+        }
+
+        if ($score >= 20) {
             return [
                 'grade' => 'Poor',
                 'description' => 'This product has several concerns. Consider better-scoring alternatives.',
                 'color' => 'orange',
             ];
-        } else {
-            return [
-                'grade' => 'Avoid',
-                'description' => 'This product is not recommended. Please consider healthier alternatives.',
-                'color' => 'red',
-            ];
         }
+
+        return [
+            'grade' => 'Avoid',
+            'description' => 'This product is not recommended. Please consider healthier alternatives.',
+            'color' => 'red',
+        ];
     }
 }

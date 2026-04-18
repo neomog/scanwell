@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Product extends Model
 {
@@ -23,14 +24,29 @@ class Product extends Model
         'name',
         'brand',
         'category_id',
+        'product_family',
+        'category_name',
         'image_url',
+        'ingredients_text',
+        'additives',
+        'allergens',
+        'region_availability',
+        'manual_overrides',
         'source',
         'raw_data',
+        'created_by',
+        'approved_by',
+        'approved_at',
     ];
 
     protected $casts = [
         'raw_data' => 'array',
         'category_id' => 'integer',
+        'additives' => 'array',
+        'allergens' => 'array',
+        'region_availability' => 'array',
+        'manual_overrides' => 'array',
+        'approved_at' => 'datetime',
     ];
 
     public function ingredients(): BelongsToMany
@@ -60,6 +76,16 @@ class Product extends Model
         return $this->hasMany(Scan::class);
     }
 
+    public function barcodes(): HasMany
+    {
+        return $this->hasMany(ProductBarcode::class)->orderByDesc('is_primary')->orderBy('barcode');
+    }
+
+    public function images(): HasMany
+    {
+        return $this->hasMany(ProductImage::class)->orderByDesc('is_primary')->orderBy('sort_order');
+    }
+
     public function alternatives(): BelongsToMany
     {
         return $this->belongsToMany(
@@ -76,24 +102,43 @@ class Product extends Model
         return $this->hasMany(ProductContribution::class);
     }
 
+    public function auditLogs(): HasMany
+    {
+        return $this->hasMany(ProductAuditLog::class);
+    }
+
     public function favoritedBy(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'user_favorites')
             ->withTimestamps();
     }
 
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function approver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by');
+    }
+
     public function isFood(): bool
     {
-        return $this->product_family === 'food';
+        return $this->resolved_product_family === 'food';
     }
 
     public function isCosmetic(): bool
     {
-        return $this->product_family === 'cosmetic';
+        return $this->resolved_product_family === 'cosmetic';
     }
 
-    public function getProductFamilyAttribute(): string
+    public function getResolvedProductFamilyAttribute(): string
     {
+        if (is_string($this->attributes['product_family'] ?? null) && $this->attributes['product_family'] !== '') {
+            return $this->attributes['product_family'];
+        }
+
         $storedFamily = data_get($this->raw_data, '_scanwell.product_family');
 
         if (is_string($storedFamily) && $storedFamily !== '') {
@@ -109,17 +154,35 @@ class Product extends Model
         };
     }
 
+    public function getProductFamilyAttribute(): string
+    {
+        return $this->resolved_product_family;
+    }
+
     public function getScoreAttribute(): ?float
     {
-        if ($this->isFood() && $this->foodScore) {
+        if ($this->resolved_product_family === 'food' && $this->foodScore) {
             return $this->foodScore->overall_score;
         }
 
-        if ($this->isCosmetic() && $this->cosmeticScore) {
+        if ($this->resolved_product_family === 'cosmetic' && $this->cosmeticScore) {
             return $this->cosmeticScore->overall_score;
         }
 
         return null;
+    }
+
+    public function getPrimaryImageUrlAttribute(): ?string
+    {
+        if ($this->image_url) {
+            return $this->image_url;
+        }
+
+        $primaryImage = $this->relationLoaded('images')
+            ? $this->images->firstWhere('is_primary', true) ?? $this->images->first()
+            : $this->images()->where('is_primary', true)->orWhereNotNull('url')->orderByDesc('is_primary')->first();
+
+        return $primaryImage?->resolved_url;
     }
 
     public function getScoreGradeAttribute(): string

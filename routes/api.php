@@ -67,7 +67,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
     // Product contributions
     Route::post('/products/{barcode}/contribute', [ProductContributionController::class, 'store']);
+    Route::put('/my-contributions/{id}', [ProductContributionController::class, 'update']);
     Route::get('/my-contributions', [ProductContributionController::class, 'userContributions']);
+    Route::get('/contributions/leaderboard', [ProductContributionController::class, 'leaderboard']);
 
     // Alternative products
     Route::get('/products/{id}/alternatives', [ProductController::class, 'alternatives']);
@@ -80,8 +82,10 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 // Admin routes
 Route::prefix('v1/admin')->middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('/contributions/pending', [ProductContributionController::class, 'pending']);
+    Route::put('/contributions/{id}', [ProductContributionController::class, 'moderateUpdate']);
     Route::post('/contributions/{id}/approve', [ProductContributionController::class, 'approve']);
     Route::post('/contributions/{id}/reject', [ProductContributionController::class, 'reject']);
+    Route::post('/contributions/{id}/flag', [ProductContributionController::class, 'flag']);
 
     // Manual product management
     Route::post('/products', [ProductController::class, 'store']);
