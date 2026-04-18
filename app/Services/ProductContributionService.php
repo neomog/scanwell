@@ -6,6 +6,7 @@ use App\Models\ProductContribution;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
 
 class ProductContributionService
@@ -239,15 +240,59 @@ class ProductContributionService
             ->first();
     }
 
+    public function leaderboardBaseQuery(): Builder
+    {
+        $pointsExpression = $this->leaderboardPointsExpression();
+
+        return User::query()
+            ->joinSub($this->leaderboardStatsSubquery(), 'contribution_stats', function ($join) {
+                $join->on('users.id', '=', 'contribution_stats.user_id');
+            })
+            ->select([
+                'users.id',
+                'users.name',
+                'users.email',
+                'users.avatar',
+            ])
+            ->selectRaw("{$pointsExpression} as reputation_points")
+            ->selectRaw('contribution_stats.approved_contributions_count as approved_contributions_count')
+            ->selectRaw('contribution_stats.rejected_contributions_count as rejected_contributions_count')
+            ->selectRaw('contribution_stats.contributions_count as contributions_count')
+            ->selectRaw('contribution_stats.contributions_max_updated_at as contributions_max_updated_at');
+    }
+
+    public function leaderboardSummary(Builder $query): array
+    {
+        $summary = DB::query()
+            ->fromSub((clone $query)->reorder(), 'leaderboard')
+            ->selectRaw('COUNT(*) as contributors')
+            ->selectRaw('COALESCE(SUM(reputation_points), 0) as reputation_points')
+            ->selectRaw('COALESCE(SUM(approved_contributions_count), 0) as approved_contributions')
+            ->selectRaw('COALESCE(MAX(reputation_points), 0) as top_score')
+            ->first();
+
+        return [
+            'contributors' => (int) ($summary->contributors ?? 0),
+            'reputation_points' => (int) ($summary->reputation_points ?? 0),
+            'approved_contributions' => (int) ($summary->approved_contributions ?? 0),
+            'top_score' => (int) ($summary->top_score ?? 0),
+        ];
+    }
+
+    public function leaderboardPointsExpression(
+        string $totalColumn = 'contribution_stats.total_points_delta',
+        string $minimumRunningColumn = 'contribution_stats.min_running_points_delta'
+    ): string
+    {
+        return "CASE WHEN {$minimumRunningColumn} < 0 THEN {$totalColumn} - {$minimumRunningColumn} ELSE {$totalColumn} END";
+    }
+
     public function leaderboard(int $perPage = 20): LengthAwarePaginator
     {
-        return User::query()
-            ->where(function (Builder $query) {
-                $query->where('reputation_points', '>', 0)
-                    ->orWhere('approved_contributions_count', '>', 0);
-            })
+        return $this->leaderboardBaseQuery()
             ->orderByDesc('reputation_points')
             ->orderByDesc('approved_contributions_count')
+            ->orderByDesc('contributions_count')
             ->paginate($perPage);
     }
 
@@ -259,5 +304,56 @@ class ProductContributionService
             $overrides,
             ['barcode' => $overrides['barcode'] ?? $contribution->barcode]
         ));
+    }
+
+    protected function leaderboardStatsSubquery(): QueryBuilder
+    {
+        [$pointsCaseExpression, $bindings] = $this->leaderboardPointsCaseExpression();
+        $contributionPoints = ProductContribution::query()
+            ->select([
+                'user_id',
+                'status',
+                'updated_at',
+                'id',
+            ])
+            ->selectRaw("{$pointsCaseExpression} as points_delta", $bindings)
+            ->selectRaw(
+                "SUM({$pointsCaseExpression}) OVER (
+                    PARTITION BY user_id
+                    ORDER BY COALESCE(reviewed_at, updated_at, created_at), id
+                    ROWS UNBOUNDED PRECEDING
+                ) as running_points_delta",
+                $bindings
+            )
+            ->whereNotNull('user_id');
+
+        return DB::query()
+            ->fromSub($contributionPoints, 'contribution_stats')
+            ->select('user_id')
+            ->selectRaw('COUNT(*) as contributions_count')
+            ->selectRaw("SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_contributions_count")
+            ->selectRaw("SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected_contributions_count")
+            ->selectRaw('SUM(points_delta) as total_points_delta')
+            ->selectRaw('MIN(running_points_delta) as min_running_points_delta')
+            ->selectRaw('MAX(updated_at) as contributions_max_updated_at')
+            ->groupBy('user_id');
+    }
+
+    protected function leaderboardPointsCaseExpression(): array
+    {
+        $cases = [];
+        $bindings = [];
+
+        foreach (config('contributions.reputation.approved', []) as $changeType => $points) {
+            $cases[] = 'WHEN status = ? AND change_type = ? THEN ?';
+            array_push($bindings, 'approved', (string) $changeType, (int) $points);
+        }
+
+        foreach (config('contributions.reputation.rejected', []) as $changeType => $points) {
+            $cases[] = 'WHEN status = ? AND change_type = ? THEN ?';
+            array_push($bindings, 'rejected', (string) $changeType, (int) $points);
+        }
+
+        return ['CASE ' . implode(' ', $cases) . ' ELSE 0 END', $bindings];
     }
 }

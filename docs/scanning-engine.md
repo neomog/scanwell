@@ -2,15 +2,13 @@
 
 ## Goal
 
-Keep the existing mobile API contract intact while making barcode resolution and product scoring more reliable.
-
 The request and response shapes for:
 
 - `POST /api/v1/scan`
 - `GET /api/v1/products/barcode/{barcode}`
 - `GET /api/v1/products/search`
 
-remain the same at the top level. The redesign only changes how the backend finds, classifies, and scores products internally.
+The top level design factors how the backend finds, classifies, and scores products internally.
 
 ## Why the old results were wrong
 
@@ -35,7 +33,7 @@ The new engine reduces that risk by:
 - classifying products before scoring them
 - adding a local barcode-first search fallback instead of trusting loose matches
 
-## New flow
+## Flow
 
 1. `ScanController` creates the scan record.
 2. `ProductAnalysisService` checks the local `products` table first.
@@ -80,7 +78,7 @@ This is useful for debugging bad matches without changing the mobile response fo
 
 ### Food
 
-Food scores now consider:
+Food scores consider:
 
 - nutrition
 - ingredient quality
@@ -116,7 +114,7 @@ when the category is not supported or trusted data is incomplete.
 
 ## Vendor architecture
 
-Providers now implement `App\Contracts\ProductCatalogProvider`.
+Providers to implement `App\Contracts\ProductCatalogProvider`.
 
 Current provider list lives in [config/scanning.php](/C:/Users/mayor/Documents/Ohiare/scanwell/home/ohiamczl/scanwell.ohiare.com/config/scanning.php:1).
 
@@ -156,10 +154,8 @@ Current provider list lives in [config/scanning.php](/C:/Users/mayor/Documents/O
 
 ## Verification
 
-Database-free unit coverage was added for:
+Database-free unit coverage added for:
 
 - family resolution
 - bottled-water packaging caps
 - conservative cosmetic scoring with missing ingredients
-
-Feature tests were also added for full API behavior, but they require the SQLite PDO driver in the environment to run locally.

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\ContributionReputationService;
+use App\Services\ProductContributionService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -12,20 +13,15 @@ use Illuminate\Support\Collection;
 class LeaderboardController extends Controller
 {
     public function __construct(
-        protected ContributionReputationService $contributionReputationService
+        protected ContributionReputationService $contributionReputationService,
+        protected ProductContributionService $productContributionService
     ) {
     }
 
     public function index(Request $request)
     {
         $levels = collect(config('contributions.levels', []))->values();
-        $query = User::query()
-            ->where(function (Builder $builder) {
-                $builder->where('reputation_points', '>', 0)
-                    ->orWhere('approved_contributions_count', '>', 0);
-            })
-            ->withCount('contributions')
-            ->withMax('contributions', 'updated_at');
+        $query = $this->productContributionService->leaderboardBaseQuery();
 
         if ($search = trim((string) $request->get('search'))) {
             $query->where(function (Builder $builder) use ($search) {
@@ -40,13 +36,7 @@ class LeaderboardController extends Controller
 
         $sort = (string) $request->get('sort', 'reputation');
 
-        $filteredSummaryQuery = clone $query;
-        $summary = [
-            'contributors' => (clone $filteredSummaryQuery)->count(),
-            'reputation_points' => (int) (clone $filteredSummaryQuery)->sum('reputation_points'),
-            'approved_contributions' => (int) (clone $filteredSummaryQuery)->sum('approved_contributions_count'),
-            'top_score' => (int) ((clone $filteredSummaryQuery)->max('reputation_points') ?? 0),
-        ];
+        $summary = $this->productContributionService->leaderboardSummary($query);
 
         $this->applySort($query, $sort);
 
@@ -55,6 +45,10 @@ class LeaderboardController extends Controller
             ->withQueryString();
 
         $leaders->getCollection()->transform(function (User $user) {
+            $user->reputation_points = (int) $user->reputation_points;
+            $user->approved_contributions_count = (int) $user->approved_contributions_count;
+            $user->rejected_contributions_count = (int) $user->rejected_contributions_count;
+            $user->contributions_count = (int) $user->contributions_count;
             $user->level = $this->contributionReputationService->levelForPoints((int) $user->reputation_points);
 
             return $user;
@@ -81,11 +75,12 @@ class LeaderboardController extends Controller
         $selected = $levels->get($selectedIndex);
         $next = $levels->get($selectedIndex + 1);
         $minPoints = (int) ($selected['points'] ?? 0);
+        $pointsExpression = $this->productContributionService->leaderboardPointsExpression();
 
-        $query->where('reputation_points', '>=', $minPoints);
+        $query->whereRaw("{$pointsExpression} >= ?", [$minPoints]);
 
         if ($next) {
-            $query->where('reputation_points', '<', (int) ($next['points'] ?? 0));
+            $query->whereRaw("{$pointsExpression} < ?", [(int) ($next['points'] ?? 0)]);
         }
     }
 

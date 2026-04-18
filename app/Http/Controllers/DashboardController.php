@@ -6,13 +6,14 @@ use App\Models\Product;
 use App\Models\ProductContribution;
 use App\Models\User;
 use App\Services\ContributionReputationService;
+use App\Services\ProductContributionService;
 use Carbon\Carbon;
-use Illuminate\Database\Eloquent\Builder;
 
 class DashboardController extends Controller
 {
     public function __construct(
-        protected ContributionReputationService $contributionReputationService
+        protected ContributionReputationService $contributionReputationService,
+        protected ProductContributionService $productContributionService
     ) {
     }
 
@@ -81,13 +82,10 @@ class DashboardController extends Controller
             ->take(10)
             ->values();
 
-        $topContributors = User::query()
-            ->where(function (Builder $query) {
-                $query->where('reputation_points', '>', 0)
-                    ->orWhere('approved_contributions_count', '>', 0);
-            })
+        $topContributors = $this->productContributionService->leaderboardBaseQuery()
             ->orderByDesc('reputation_points')
             ->orderByDesc('approved_contributions_count')
+            ->orderByDesc('contributions_count')
             ->take(5)
             ->get()
             ->values()
@@ -97,9 +95,9 @@ class DashboardController extends Controller
                     'name' => $user->name,
                     'email' => $user->email,
                     'avatar' => $user->avatar,
-                    'reputation_points' => $user->reputation_points,
-                    'approved_contributions_count' => $user->approved_contributions_count,
-                    'rejected_contributions_count' => $user->rejected_contributions_count,
+                    'reputation_points' => (int) $user->reputation_points,
+                    'approved_contributions_count' => (int) $user->approved_contributions_count,
+                    'rejected_contributions_count' => (int) $user->rejected_contributions_count,
                     'level' => $this->contributionReputationService->levelForPoints((int) $user->reputation_points),
                 ];
             });

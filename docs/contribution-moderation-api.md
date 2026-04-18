@@ -86,6 +86,10 @@ So the "not found" response is now richer.
 - `PUT /api/v1/admin/contributions/{id}`
 - `POST /api/v1/admin/contributions/{id}/flag`
 
+Leaderboard-specific request and response examples are documented in:
+
+- [Leaderboard Documentation](leaderboard.md)
+
 ### 6. Admin product create/update accepts richer payloads
 
 Admin product management endpoints now also accept:
