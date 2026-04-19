@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\Product;
+use Illuminate\Support\Facades\Storage;
+
 class ProductPayloadService
 {
     public function fromInput(array $input): array
@@ -108,7 +110,7 @@ class ProductPayloadService
             'category_id' => $product->category_id,
             'category_name' => $product->category_name,
             'product_family' => $product->resolved_product_family,
-            'image_url' => $product->image_url,
+            'image_url' => $product->primary_image_url,
             'ingredients_text' => $product->ingredients_text,
             'additives' => $product->additives ?? [],
             'allergens' => $product->allergens ?? [],
@@ -147,7 +149,7 @@ class ProductPayloadService
                 'is_primary' => $barcode->is_primary,
             ])->values()->all(),
             'images' => $product->images->map(fn ($image) => [
-                'url' => $image->url,
+                'url' => $image->resolved_url,
                 'disk' => $image->disk,
                 'path' => $image->path,
                 'source' => $image->source,
@@ -155,6 +157,52 @@ class ProductPayloadService
                 'sort_order' => $image->sort_order,
             ])->values()->all(),
         ];
+    }
+
+    public function presentContributionPayload(?array $payload): ?array
+    {
+        if (!is_array($payload)) {
+            return $payload;
+        }
+
+        $presented = $this->fromInput($payload);
+
+        if (!array_key_exists('images', $presented) || !is_array($presented['images'])) {
+            return $presented;
+        }
+
+        $presented['images'] = collect($presented['images'])
+            ->map(function ($image, int $index) {
+                if (!is_array($image)) {
+                    return null;
+                }
+
+                $image['url'] = $image['url'] ?? $this->resolveStoredImageUrl(
+                    $image['disk'] ?? null,
+                    $image['path'] ?? null
+                );
+                $image['is_primary'] = (bool) ($image['is_primary'] ?? $index === 0);
+                $image['sort_order'] = isset($image['sort_order']) ? (int) $image['sort_order'] : $index;
+
+                return $image['url'] || ($image['disk'] ?? null) || ($image['path'] ?? null)
+                    ? $image
+                    : null;
+            })
+            ->filter()
+            ->values()
+            ->all();
+
+        if (
+            (!array_key_exists('image_url', $presented) || !$presented['image_url'])
+            && !empty($presented['images'])
+        ) {
+            $primaryImage = collect($presented['images'])->firstWhere('is_primary', true)
+                ?? $presented['images'][0];
+
+            $presented['image_url'] = $primaryImage['url'] ?? null;
+        }
+
+        return $presented;
     }
 
     public function mergeForContribution(Product $product, array $input): array
@@ -303,15 +351,18 @@ class ProductPayloadService
                 }
 
                 $url = $this->nullableString($image['url'] ?? null);
+                $disk = $this->nullableString($image['disk'] ?? null);
                 $path = $this->nullableString($image['path'] ?? null);
 
                 if (!$url && !$path) {
                     return null;
                 }
 
+                $url ??= $this->resolveStoredImageUrl($disk, $path);
+
                 return [
                     'url' => $url,
-                    'disk' => $this->nullableString($image['disk'] ?? null),
+                    'disk' => $disk,
                     'path' => $path,
                     'source' => $this->nullableString($image['source'] ?? 'manual') ?? 'manual',
                     'is_primary' => (bool) ($image['is_primary'] ?? $index === 0),
@@ -353,5 +404,14 @@ class ProductPayloadService
         return array_key_exists($key, $input)
             && $input[$key] !== null
             && trim((string) $input[$key]) !== '';
+    }
+
+    protected function resolveStoredImageUrl(?string $disk, ?string $path): ?string
+    {
+        if (!$disk || !$path) {
+            return null;
+        }
+
+        return Storage::disk($disk)->url($path);
     }
 }

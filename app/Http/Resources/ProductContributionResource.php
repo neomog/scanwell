@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Services\ProductPayloadService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -14,6 +15,8 @@ class ProductContributionResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $payloadService = app(ProductPayloadService::class);
+
         return [
             'id' => $this->id,
             'user' => [
@@ -25,9 +28,9 @@ class ProductContributionResource extends JsonResource
             'product_name' => $this->product_name,
             'change_type' => $this->change_type,
             'field_name' => $this->field_name,
-            'old_data' => $this->old_data,
-            'new_data' => $this->new_data,
-            'moderated_data' => $this->moderated_data,
+            'old_data' => $payloadService->presentContributionPayload($this->old_data),
+            'new_data' => $payloadService->presentContributionPayload($this->new_data),
+            'moderated_data' => $payloadService->presentContributionPayload($this->moderated_data),
             'reason' => $this->reason,
             'evidence' => $this->evidence,
             'status' => $this->status,

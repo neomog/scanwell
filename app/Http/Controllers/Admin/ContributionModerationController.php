@@ -49,7 +49,14 @@ class ContributionModerationController extends Controller
     {
         $contribution->load(['user', 'product.images', 'product.barcodes', 'product.ingredients', 'reviewer', 'auditLogs.actor']);
 
-        return view('admin.contributions.show', compact('contribution'));
+        return view('admin.contributions.show', [
+            'contribution' => $contribution,
+            'currentData' => $this->productPayloadService->presentContributionPayload($contribution->old_data),
+            'submittedData' => $this->productPayloadService->presentContributionPayload($contribution->new_data),
+            'reviewData' => $this->productPayloadService->presentContributionPayload(
+                $contribution->moderated_data ?? $contribution->new_data
+            ),
+        ]);
     }
 
     public function update(Request $request, ProductContribution $contribution)
@@ -78,7 +85,12 @@ class ContributionModerationController extends Controller
         $this->productContributionService->updateForModeration(
             $contribution,
             $request->user(),
-            $this->buildInput($request, $validated, $contribution->barcode)
+            $this->buildInput(
+                $request,
+                $validated,
+                $contribution->barcode,
+                $contribution->moderated_data ?? $contribution->new_data ?? []
+            )
         );
 
         return redirect()
@@ -112,7 +124,12 @@ class ContributionModerationController extends Controller
         $this->productContributionService->approve(
             $contribution,
             $request->user(),
-            $this->buildInput($request, $validated, $contribution->barcode),
+            $this->buildInput(
+                $request,
+                $validated,
+                $contribution->barcode,
+                $contribution->moderated_data ?? $contribution->new_data ?? []
+            ),
             $validated['notes'] ?? null
         );
 
@@ -147,40 +164,109 @@ class ContributionModerationController extends Controller
             ->with('success', 'Contribution flagged.');
     }
 
-    protected function buildInput(Request $request, array $validated, string $defaultBarcode): array
+    protected function buildInput(Request $request, array $validated, string $defaultBarcode, array $existingPayload = []): array
     {
         $input = $validated;
-        $input['ingredients'] = $this->splitLines($validated['ingredients'] ?? null, true);
-        $input['additives'] = $this->splitLines($validated['additives'] ?? null);
-        $input['allergens'] = $this->splitLines($validated['allergens'] ?? null);
-        $input['region_availability'] = $this->splitLines($validated['region_availability'] ?? null);
-        $input['barcodes'] = $this->splitLines($validated['barcodes'] ?? null, true, 'barcode');
-        $input['image_urls'] = $this->splitLines($validated['image_urls'] ?? null);
-        $input['nutrition'] = $this->parseNutrition($validated['nutrition'] ?? null);
-        $input['barcode'] = $validated['barcode'] ?? $defaultBarcode;
+        $currentImages = data_get(
+            $this->productPayloadService->presentContributionPayload($existingPayload),
+            'images',
+            []
+        );
 
-        if ($request->hasFile('image_files')) {
-            $uploadedImages = [];
+        if (array_key_exists('ingredients', $validated)) {
+            $input['ingredients'] = $this->splitLines($validated['ingredients'], true);
+        }
 
-            foreach ($request->file('image_files') as $index => $file) {
-                $path = $file->store('product-contributions', 'public');
-                $uploadedImages[] = [
-                    'disk' => 'public',
-                    'path' => $path,
-                    'source' => 'moderation_upload',
-                    'is_primary' => $index === 0,
-                    'sort_order' => $index,
-                ];
-            }
+        if (array_key_exists('additives', $validated)) {
+            $input['additives'] = $this->splitLines($validated['additives']);
+        }
 
-            $input['images'] = array_merge($input['images'] ?? [], $uploadedImages);
+        if (array_key_exists('allergens', $validated)) {
+            $input['allergens'] = $this->splitLines($validated['allergens']);
+        }
 
-            if (!isset($input['image_url']) && count($uploadedImages) > 0) {
-                $input['image_url'] = Storage::disk('public')->url($uploadedImages[0]['path']);
+        if (array_key_exists('region_availability', $validated)) {
+            $input['region_availability'] = $this->splitLines($validated['region_availability']);
+        }
+
+        if (array_key_exists('barcodes', $validated)) {
+            $input['barcodes'] = $this->splitLines($validated['barcodes'], true, 'barcode');
+        }
+
+        if (array_key_exists('nutrition', $validated)) {
+            $input['nutrition'] = $this->parseNutrition($validated['nutrition']);
+        }
+
+        if (array_key_exists('barcode', $validated)) {
+            $input['barcode'] = $validated['barcode'] ?? $defaultBarcode;
+        }
+
+        if (array_key_exists('image_urls', $validated) || $request->hasFile('image_files')) {
+            $input['images'] = $this->buildImagesFromInput(
+                $this->splitLines($validated['image_urls'] ?? null),
+                $request,
+                $currentImages
+            );
+
+            if (!array_key_exists('image_url', $validated)) {
+                $input['image_url'] = $input['images'][0]['url'] ?? null;
             }
         }
 
         return $this->productPayloadService->fromInput($input);
+    }
+
+    protected function buildImagesFromInput(array $imageUrls, Request $request, array $existingImages = []): array
+    {
+        $existingImagesByUrl = collect($existingImages)
+            ->filter(fn ($image) => is_array($image) && !empty($image['url'] ?? null))
+            ->keyBy(fn ($image) => $image['url']);
+
+        $images = collect($imageUrls)
+            ->map(function (string $url, int $index) use ($existingImagesByUrl) {
+                $existingImage = $existingImagesByUrl->get($url);
+
+                if (is_array($existingImage)) {
+                    $existingImage['is_primary'] = $index === 0;
+                    $existingImage['sort_order'] = $index;
+
+                    return $existingImage;
+                }
+
+                return [
+                    'url' => $url,
+                    'disk' => null,
+                    'path' => null,
+                    'source' => 'manual',
+                    'is_primary' => $index === 0,
+                    'sort_order' => $index,
+                ];
+            })
+            ->values();
+
+        if ($request->hasFile('image_files')) {
+            foreach ($request->file('image_files') as $file) {
+                $path = $file->store('product-contributions', 'public');
+                $images->push([
+                    'disk' => 'public',
+                    'path' => $path,
+                    'url' => Storage::disk('public')->url($path),
+                    'source' => 'moderation_upload',
+                    'is_primary' => false,
+                    'sort_order' => $images->count(),
+                ]);
+            }
+        }
+
+        return $images
+            ->values()
+            ->map(function (array $image, int $index) {
+                $image['is_primary'] = $index === 0;
+                $image['sort_order'] = $index;
+
+                return $image;
+            })
+            ->all();
     }
 
     protected function splitLines(?string $value, bool $asArrayObjects = false, string $objectKey = 'name'): array

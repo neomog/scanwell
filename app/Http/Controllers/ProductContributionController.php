@@ -416,6 +416,7 @@ class ProductContributionController extends Controller
                 $uploadedImages[] = [
                     'disk' => 'public',
                     'path' => $path,
+                    'url' => Storage::disk('public')->url($path),
                     'source' => 'contribution_upload',
                     'is_primary' => $index === 0,
                     'sort_order' => $index,

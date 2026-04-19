@@ -90,7 +90,8 @@ class ProductContributionService
 
     public function updateForModeration(ProductContribution $contribution, User $admin, array $input): ProductContribution
     {
-        $merged = $this->productPayloadService->fromInput(array_merge($contribution->new_data ?? [], $input, [
+        $basePayload = $contribution->moderated_data ?? $contribution->new_data ?? [];
+        $merged = $this->productPayloadService->fromInput(array_merge($basePayload, $input, [
             'barcode' => $input['barcode'] ?? $contribution->barcode,
         ]));
 

@@ -1,5 +1,4 @@
 @php
-    $reviewData = $contribution->moderated_data ?? $contribution->new_data ?? [];
     $ingredientLines = collect(data_get($reviewData, 'ingredients', []))->pluck('name')->implode(PHP_EOL);
     $nutritionLines = collect(data_get($reviewData, 'nutrition', []))->map(fn ($value, $key) => $key . ': ' . $value)->implode(PHP_EOL);
     $additiveLines = collect(data_get($reviewData, 'additives', []))->implode(PHP_EOL);
@@ -7,6 +6,8 @@
     $regionLines = collect(data_get($reviewData, 'region_availability', []))->implode(PHP_EOL);
     $barcodeLines = collect(data_get($reviewData, 'barcodes', []))->map(fn ($item) => is_array($item) ? ($item['barcode'] ?? '') : $item)->filter()->implode(PHP_EOL);
     $imageUrlLines = collect(data_get($reviewData, 'images', []))->map(fn ($item) => is_array($item) ? ($item['url'] ?? '') : $item)->filter()->implode(PHP_EOL);
+    $submittedImages = collect(data_get($submittedData, 'images', []))->filter(fn ($item) => !empty($item['url'] ?? null))->values();
+    $reviewImages = collect(data_get($reviewData, 'images', []))->filter(fn ($item) => !empty($item['url'] ?? null))->values();
 @endphp
 
 <x-app-layout>
@@ -45,12 +46,52 @@
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div>
+                        <p class="text-xs uppercase text-gray-400 mb-2">Submitted Images</p>
+                        <div class="grid grid-cols-2 gap-3">
+                            @forelse($submittedImages as $image)
+                                <div class="space-y-2">
+                                    <img src="{{ $image['url'] }}" alt="{{ $contribution->product_name ?: 'Submitted image' }}" class="w-full h-32 object-cover rounded-lg border border-gray-200">
+                                    <div class="text-xs text-gray-500">
+                                        {{ ucfirst(str_replace('_', ' ', $image['source'] ?? 'manual')) }}
+                                        @if($image['is_primary'] ?? false)
+                                            <span class="ml-2 px-2 py-0.5 rounded-full bg-green-100 text-green-700">Primary</span>
+                                        @endif
+                                    </div>
+                                </div>
+                            @empty
+                                <p class="text-sm text-gray-500 col-span-2">No submitted images.</p>
+                            @endforelse
+                        </div>
+                    </div>
+
+                    <div>
+                        <p class="text-xs uppercase text-gray-400 mb-2">Review Images</p>
+                        <div class="grid grid-cols-2 gap-3">
+                            @forelse($reviewImages as $image)
+                                <div class="space-y-2">
+                                    <img src="{{ $image['url'] }}" alt="{{ $contribution->product_name ?: 'Review image' }}" class="w-full h-32 object-cover rounded-lg border border-gray-200">
+                                    <div class="text-xs text-gray-500">
+                                        {{ ucfirst(str_replace('_', ' ', $image['source'] ?? 'manual')) }}
+                                        @if($image['is_primary'] ?? false)
+                                            <span class="ml-2 px-2 py-0.5 rounded-full bg-green-100 text-green-700">Primary</span>
+                                        @endif
+                                    </div>
+                                </div>
+                            @empty
+                                <p class="text-sm text-gray-500 col-span-2">No review images yet.</p>
+                            @endforelse
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div>
                         <p class="text-xs uppercase text-gray-400 mb-2">Current Product Snapshot</p>
-                        <pre class="bg-gray-50 rounded-lg p-4 text-xs overflow-x-auto">{{ json_encode($contribution->old_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                        <pre class="bg-gray-50 rounded-lg p-4 text-xs overflow-x-auto">{{ json_encode($currentData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
                     </div>
                     <div>
                         <p class="text-xs uppercase text-gray-400 mb-2">Submitted Change</p>
-                        <pre class="bg-gray-50 rounded-lg p-4 text-xs overflow-x-auto">{{ json_encode($contribution->new_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                        <pre class="bg-gray-50 rounded-lg p-4 text-xs overflow-x-auto">{{ json_encode($submittedData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
                     </div>
                 </div>
             </div>

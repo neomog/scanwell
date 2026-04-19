@@ -7,6 +7,8 @@ use App\Models\ProductContribution;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\UploadedFile;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -180,5 +182,95 @@ class ProductContributionFlowTest extends TestCase
         $product->refresh();
         $this->assertSame('Fixed Brand', $product->brand);
         $this->assertSame('Fixed Brand', $product->manual_overrides['brand'] ?? null);
+    }
+
+    public function test_admin_dashboard_approval_keeps_uploaded_contribution_images(): void
+    {
+        Storage::fake('public');
+
+        $contributor = User::factory()->create();
+        $admin = User::factory()->admin()->create();
+        $barcode = '7700011122233';
+        $storedPath = UploadedFile::fake()->image('front.jpg')->store('product-contributions', 'public');
+
+        $contribution = ProductContribution::create([
+            'user_id' => $contributor->id,
+            'change_type' => 'add',
+            'new_data' => [
+                'barcode' => $barcode,
+                'name' => 'Photo Yogurt',
+                'brand' => 'Farm Fresh',
+                'images' => [[
+                    'disk' => 'public',
+                    'path' => $storedPath,
+                    'source' => 'contribution_upload',
+                    'is_primary' => true,
+                    'sort_order' => 0,
+                ]],
+                'ingredients' => [
+                    ['name' => 'Milk'],
+                    ['name' => 'Culture'],
+                ],
+                'nutrition' => [
+                    'calories' => 95,
+                    'protein' => 6,
+                ],
+            ],
+            'reason' => 'Includes package photos for moderation.',
+            'status' => 'pending',
+            'barcode' => $barcode,
+            'product_name' => 'Photo Yogurt',
+        ]);
+
+        $response = $this->actingAs($admin)->post(
+            "/admin/contributions/{$contribution->id}/approve",
+            ['notes' => 'Verified against submitted images.']
+        );
+
+        $response->assertRedirect("/admin/contributions/{$contribution->id}");
+
+        $product = Product::with(['images', 'ingredients', 'nutrition'])->where('barcode', $barcode)->firstOrFail();
+
+        $this->assertSame(1, $product->images->count());
+        $this->assertSame(Storage::disk('public')->url($storedPath), $product->images->first()->resolved_url);
+        $this->assertSame(['Milk', 'Culture'], $product->ingredients->pluck('name')->all());
+        $this->assertSame(95.0, $product->nutrition?->calories);
+        $this->assertSame('approved', $contribution->fresh()->status);
+    }
+
+    public function test_admin_contribution_review_page_displays_uploaded_contribution_images(): void
+    {
+        Storage::fake('public');
+
+        $admin = User::factory()->admin()->create();
+        $contributor = User::factory()->create();
+        $storedPath = UploadedFile::fake()->image('front.jpg')->store('product-contributions', 'public');
+
+        $contribution = ProductContribution::create([
+            'user_id' => $contributor->id,
+            'change_type' => 'add',
+            'new_data' => [
+                'barcode' => '7712312312312',
+                'name' => 'Preview Juice',
+                'images' => [[
+                    'disk' => 'public',
+                    'path' => $storedPath,
+                    'source' => 'contribution_upload',
+                    'is_primary' => true,
+                    'sort_order' => 0,
+                ]],
+            ],
+            'reason' => 'Preview images should be visible in moderation.',
+            'status' => 'pending',
+            'barcode' => '7712312312312',
+            'product_name' => 'Preview Juice',
+        ]);
+
+        $response = $this->actingAs($admin)->get("/admin/contributions/{$contribution->id}");
+
+        $response->assertOk();
+        $response->assertSee(Storage::disk('public')->url($storedPath), false);
+        $response->assertSee('Submitted Images');
+        $response->assertSee('Review Images');
     }
 }
