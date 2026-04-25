@@ -4,7 +4,7 @@
 >
     <!-- Toggle Button -->
     <div class="flex items-center justify-between p-4">
-        <span x-show="sidebarOpen" class="text-lg font-bold">Scanwell</span>
+        <span x-show="sidebarOpen" class="text-lg font-bold">LiveWise</span>
 
         <button @click="sidebarOpen = !sidebarOpen" class="p-2 rounded hover:bg-gray-100">
             <!-- Menu Icon -->
