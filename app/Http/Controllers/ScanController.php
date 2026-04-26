@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\PlanFeatureException;
 use App\Http\Requests\ScanRequest;
 use App\Http\Resources\ProductContributionResource;
 use App\Http\Resources\ProductResource;
@@ -11,6 +12,7 @@ use App\Models\Scan;
 use App\Models\UserPreference;
 use App\Services\ProductAnalysisService;
 use App\Services\ProductContributionService;
+use App\Services\SubscriptionManager;
 use Error;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -20,13 +22,17 @@ class ScanController extends Controller
 {
     public function __construct(
         protected ProductAnalysisService $analysisService,
-        protected ProductContributionService $productContributionService
+        protected ProductContributionService $productContributionService,
+        protected SubscriptionManager $subscriptionManager
     ) {
     }
 
     public function scan(ScanRequest $request): JsonResponse
     {
         try {
+            $this->subscriptionManager->ensureFeature(Auth::user(), 'scans.enabled');
+            $this->subscriptionManager->enforceMonthlyScanLimit(Auth::user());
+
             $validated = $request->validated();
             $barcode = $validated['barcode'];
 
@@ -80,8 +86,15 @@ class ScanController extends Controller
                     'personalized_warnings' => $personalizedWarnings,
                     'alternatives' => $alternatives ? ProductResource::collection($alternatives) : [],
                     'score_interpretation' => $this->interpretScore($score, $product),
+                    'remaining_monthly_scans' => $this->subscriptionManager->remainingMonthlyScans(Auth::user()),
                 ],
             ]);
+        } catch (PlanFeatureException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'feature' => $e->feature,
+            ], 403);
         } catch (Exception|Error $e) {
             if (isset($scan)) {
                 $scan->markAsFailed($e->getMessage());

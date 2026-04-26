@@ -123,19 +123,32 @@
             <span x-show="sidebarOpen">Leaderboard</span>
         </a>
 
-        <!-- Settings -->
-        <a href="#"
+        <a href="{{ route('admin.plans.index') }}"
            class="flex items-center gap-3 px-3 py-2 rounded-lg transition
-           {{ request()->routeIs('settings.*')
+           {{ request()->routeIs('admin.plans.*') || request()->routeIs('admin.prices.*')
                 ? 'bg-gray-200 text-gray-900 font-semibold'
                 : 'text-gray-600 hover:bg-gray-100' }}">
 
             <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M10.325 4.317a1 1 0 011.35-.936l1.724.994a1 1 0 00.95 0l1.724-.994a1 1 0 011.35.936l.345 1.993a1 1 0 00.57.75l1.805.72a1 1 0 01.554 1.257l-.684 1.879a1 1 0 000 .832l.684 1.879a1 1 0 01-.554 1.257l-1.805.72a1 1 0 00-.57.75l-.345 1.993a1 1 0 01-1.35.936l-1.724-.994a1 1 0 00-.95 0l-1.724.994a1 1 0 01-1.35-.936l-.345-1.993a1 1 0 00-.57-.75l-1.805-.72a1 1 0 01-.554-1.257l.684-1.879a1 1 0 000-.832l-.684-1.879a1 1 0 01.554-1.257l1.805-.72a1 1 0 00.57-.75l.345-1.993z"/>
+                      d="M12 8c-2.21 0-4 .79-4 3v1h8v-1c0-2.21-1.79-3-4-3zm0-4a2 2 0 100 4 2 2 0 000-4zm7 9h2v7h-18v-7h2"/>
             </svg>
 
-            <span x-show="sidebarOpen">Settings</span>
+            <span x-show="sidebarOpen">Plans</span>
+        </a>
+
+        <a href="{{ route('admin.subscriptions.index') }}"
+           class="flex items-center gap-3 px-3 py-2 rounded-lg transition
+           {{ request()->routeIs('admin.subscriptions.*')
+                ? 'bg-gray-200 text-gray-900 font-semibold'
+                : 'text-gray-600 hover:bg-gray-100' }}">
+
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M17 9V7a5 5 0 00-10 0v2M5 9h14l1 11H4L5 9zm3 4h.01M12 13h.01M16 13h.01"/>
+            </svg>
+
+            <span x-show="sidebarOpen">Subscriptions</span>
         </a>
 
     </nav>

@@ -22,3 +22,9 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+scanwell_12_04_wo_buid.zip
+public.zip
+/public/index.zip
+/app/Http/Controllers/ProductContributionController_old.php
+/app/Http/Resources/ProductContributionResource_old.php
+.gitignore

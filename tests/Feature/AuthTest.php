@@ -22,8 +22,22 @@ class AuthTest extends TestCase
 
         $response->assertStatus(201)
             ->assertJsonStructure([
-                'user' => ['id', 'name', 'email'],
-                'token'
-            ]);
+                'success',
+                'message',
+                'data' => [
+                    'user' => [
+                        'id',
+                        'name',
+                        'email',
+                        'subscription' => [
+                            'plan' => ['slug', 'name'],
+                            'status',
+                        ],
+                    ],
+                    'token',
+                    'token_type',
+                ],
+            ])
+            ->assertJsonPath('data.user.subscription.plan.slug', 'free');
     }
 }

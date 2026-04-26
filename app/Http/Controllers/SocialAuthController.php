@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Google_Client;
+use App\Http\Resources\UserResource;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -66,7 +67,7 @@ class SocialAuthController extends Controller
             'success' => true,
             'data' => [
                 'token' => $token,
-                'user' => $user
+                'user' => new UserResource($user)
             ]
         ]);
     }
@@ -103,7 +104,7 @@ class SocialAuthController extends Controller
             'message' => 'Mobile Google authentication successful',
             'data' => [
                 'token' => $token,
-                'user' => $user,
+                'user' => new UserResource($user),
             ],
         ]);
 
@@ -112,7 +113,7 @@ class SocialAuthController extends Controller
             'message' => 'Mobile Google authentication successful',
             'data' => [
                 'token' => $token,
-                'user' => $user,
+                'user' => new UserResource($user),
             ],
         ]);
     }

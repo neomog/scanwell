@@ -5,6 +5,9 @@ namespace App\Models;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -29,6 +32,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'provider',
         'provider_id',
         'avatar',
+        'stripe_customer_id',
         'role',
         'reputation_points',
         'approved_contributions_count',
@@ -61,7 +65,7 @@ class User extends Authenticatable implements MustVerifyEmail
         ];
     }
 
-    public function favoriteProducts()
+    public function favoriteProducts(): BelongsToMany
     {
         return $this->belongsToMany(Product::class, 'user_favorites')
             ->withTimestamps();
@@ -82,19 +86,36 @@ class User extends Authenticatable implements MustVerifyEmail
         return cache()->get("user_banned_{$this->id}");
     }
 
-    public function scans()
+    public function scans(): HasMany
     {
         return $this->hasMany(Scan::class);
     }
 
-    public function contributions()
+    public function contributions(): HasMany
     {
         return $this->hasMany(ProductContribution::class);
     }
 
-    public function auditLogs()
+    public function auditLogs(): HasMany
     {
         return $this->hasMany(ProductAuditLog::class, 'actor_id');
+    }
+
+    public function preferences(): HasOne
+    {
+        return $this->hasOne(UserPreference::class);
+    }
+
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(Subscription::class);
+    }
+
+    public function currentSubscription(): HasOne
+    {
+        return $this->hasOne(Subscription::class)
+            ->whereIn('status', Subscription::CURRENT_STATUSES)
+            ->latestOfMany('created_at');
     }
 
 }

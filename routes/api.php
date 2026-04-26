@@ -1,10 +1,12 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\Api\BillingController as ApiBillingController;
 use App\Http\Controllers\ProductContributionController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ScanController;
 use App\Http\Controllers\SocialAuthController;
+use App\Http\Controllers\StripeWebhookController;
 use App\Http\Controllers\UserPreferenceController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -15,6 +17,7 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::post('/stripe/webhook', StripeWebhookController::class)->name('api.stripe.webhook');
 
 // Protected routes
 Route::middleware('auth:sanctum', 'verified')->group(function () {
@@ -48,11 +51,15 @@ Route::prefix('v1')->group(function () {
     Route::get('/products/search', [ProductController::class, 'search']);
     Route::get('/products/barcode/{barcode}', [ProductController::class, 'findByBarcode']);
     Route::get('/products/{id}', [ProductController::class, 'show']);
+    Route::get('/billing/plans', [ApiBillingController::class, 'plans']);
 });
 
 
 // Protected routes (require authentication)
 Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
+    Route::get('/billing/subscription', [ApiBillingController::class, 'subscription']);
+    Route::post('/billing/checkout', [ApiBillingController::class, 'checkout']);
+    Route::post('/billing/cancel', [ApiBillingController::class, 'cancel']);
 
     // Scan routes
     Route::post('/scan', [ScanController::class, 'scan']);
@@ -63,10 +70,12 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // User preferences
     Route::get('/preferences', [UserPreferenceController::class, 'show']);
     Route::put('/preferences', [UserPreferenceController::class, 'update']);
-    Route::get('/recommendations', [UserPreferenceController::class, 'recommendations']);
+    Route::get('/recommendations', [UserPreferenceController::class, 'recommendations'])
+        ->middleware('plan.feature:recommendations.enabled');
 
     // Product contributions
-    Route::post('/products/{barcode}/contribute', [ProductContributionController::class, 'store']);
+    Route::post('/products/{barcode}/contribute', [ProductContributionController::class, 'store'])
+        ->middleware('plan.feature:contributions.enabled');
     Route::put('/my-contributions/{id}', [ProductContributionController::class, 'update']);
     Route::get('/my-contributions', [ProductContributionController::class, 'userContributions']);
     Route::get('/contributions/leaderboard', [ProductContributionController::class, 'leaderboard']);

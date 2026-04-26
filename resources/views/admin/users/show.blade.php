@@ -124,6 +124,68 @@
 
             <!-- Stats Section -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-semibold text-gray-800">Subscription Overview</h3>
+                        <a href="{{ route('admin.subscriptions.show', $currentSubscription) }}" class="text-sm text-[#1FA774] hover:text-[#0D8B5E] transition">
+                            View details
+                        </a>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="rounded-lg bg-gray-50 p-4">
+                            <p class="text-xs text-gray-500">Plan</p>
+                            <p class="mt-2 text-lg font-semibold text-gray-900">{{ $currentSubscription->plan?->name }}</p>
+                        </div>
+                        <div class="rounded-lg bg-gray-50 p-4">
+                            <p class="text-xs text-gray-500">Status</p>
+                            <p class="mt-2 text-lg font-semibold text-gray-900">{{ ucfirst(str_replace('_', ' ', $currentSubscription->status)) }}</p>
+                        </div>
+                        <div class="rounded-lg bg-gray-50 p-4">
+                            <p class="text-xs text-gray-500">Billing option</p>
+                            <p class="mt-2 text-lg font-semibold text-gray-900">{{ $currentSubscription->price?->name ?? 'Included' }}</p>
+                        </div>
+                        <div class="rounded-lg bg-gray-50 p-4">
+                            <p class="text-xs text-gray-500">Period end</p>
+                            <p class="mt-2 text-lg font-semibold text-gray-900">{{ $currentSubscription->current_period_ends_at?->format('M d, Y') ?? 'No expiry' }}</p>
+                        </div>
+                    </div>
+
+                    @if($subscriptionHistory->isNotEmpty())
+                        <div class="mt-4">
+                            <p class="text-sm font-semibold text-gray-800 mb-3">Recent subscription history</p>
+                            <div class="space-y-2">
+                                @foreach($subscriptionHistory as $entry)
+                                    <div class="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-3">
+                                        <div>
+                                            <p class="text-sm font-medium text-gray-900">{{ $entry->plan?->name }}</p>
+                                            <p class="text-xs text-gray-500">{{ $entry->price?->name ?? 'Included' }}</p>
+                                        </div>
+                                        <div class="text-right">
+                                            <p class="text-sm font-medium text-gray-900">{{ ucfirst(str_replace('_', ' ', $entry->status)) }}</p>
+                                            <p class="text-xs text-gray-500">{{ $entry->created_at->format('M d, Y') }}</p>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+
+                    @php($pendingChange = data_get($currentSubscription->metadata, 'pending_change'))
+                    @if($pendingChange)
+                        <div class="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                            <p class="text-sm font-semibold text-amber-900">Scheduled plan change</p>
+                            <p class="text-sm text-amber-800 mt-1">
+                                {{ $pendingChange['plan_name'] ?? 'Pending plan' }}
+                                @if(!empty($pendingChange['price_name']))
+                                    / {{ $pendingChange['price_name'] }}
+                                @endif
+                                at {{ !empty($pendingChange['effective_at']) ? \Illuminate\Support\Carbon::parse($pendingChange['effective_at'])->format('M d, Y') : 'period end' }}.
+                            </p>
+                        </div>
+                    @endif
+                </div>
+
                 <!-- Contribution Stats -->
                 <div class="bg-white rounded-xl shadow-sm p-6">
                     <div class="flex items-center justify-between mb-4">
@@ -327,6 +389,70 @@
                         </form>
                     @endif
                 </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm p-6">
+                <div class="flex items-start justify-between gap-4 mb-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-800">Change User Plan</h3>
+                        <p class="text-sm text-gray-500 mt-1">Use billing transitions for Stripe-managed subscriptions. Use manual override for complimentary or internal access.</p>
+                    </div>
+                </div>
+
+                <form method="POST" action="{{ route('admin.users.subscription.change', $user) }}" class="space-y-4">
+                    @csrf
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Target plan / price</label>
+                            <select name="price_id" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]" required>
+                                @foreach($assignablePlans as $plan)
+                                    <optgroup label="{{ $plan->name }}">
+                                        @foreach($plan->prices as $price)
+                                            <option value="{{ $price->id }}">
+                                                {{ $plan->name }} / {{ $price->name }} / {{ $price->formattedAmount() }}
+                                            </option>
+                                        @endforeach
+                                    </optgroup>
+                                @endforeach
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Transition type</label>
+                            <select name="transition_type" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]" required>
+                                <option value="billing_now">Billing change now</option>
+                                <option value="billing_next_cycle">Billing change next cycle</option>
+                                <option value="manual_override">Manual override</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Reason</label>
+                        <textarea name="reason" rows="3" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]" placeholder="Explain why this admin change is being made"></textarea>
+                    </div>
+
+                    <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-4">
+                        <input type="checkbox" name="cancel_current_stripe" value="1" class="mt-1 rounded border-gray-300 text-[#1FA774] focus:ring-[#1FA774]">
+                        <span>
+                            <span class="block text-sm font-medium text-gray-900">Cancel active Stripe subscription immediately when using manual override</span>
+                            <span class="block text-xs text-gray-500 mt-1">Required for manual overrides on currently Stripe-managed paid users.</span>
+                        </span>
+                    </label>
+
+                    <div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">
+                        `Billing change now`: updates a Stripe-managed paid subscription immediately, or moves the user to a free plan right away.
+                        `Billing change next cycle`: schedules the current Stripe subscription to end at period close and applies the new plan afterward.
+                        `Manual override`: creates a local complimentary/system entitlement and should be used for non-billing admin grants.
+                    </div>
+
+                    <div class="flex justify-end">
+                        <button type="submit" class="inline-flex items-center px-4 py-2 bg-[#1FA774] hover:bg-[#0D8B5E] text-white rounded-lg transition shadow-sm">
+                            Apply plan change
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
