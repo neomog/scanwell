@@ -39,7 +39,7 @@
                         <div class="rounded-xl bg-gray-50 p-4">
                             <p class="text-xs uppercase tracking-wide text-gray-400">Current period</p>
                             <p class="mt-2 text-lg font-semibold text-gray-900">{{ $subscription->current_period_starts_at?->format('M d, Y') ?? 'N/A' }}</p>
-                            <p class="text-sm text-gray-500 mt-1">to {{ $subscription->current_period_ends_at?->format('M d, Y') ?? 'No expiry' }}</p>
+                            <p class="text-sm text-gray-500 mt-1">to {{ $subscription->display_expiry_at?->format('M d, Y') ?? 'No expiry' }}</p>
                         </div>
                         <div class="rounded-xl bg-gray-50 p-4">
                             <p class="text-xs uppercase tracking-wide text-gray-400">Cancellation / refund</p>
@@ -81,6 +81,74 @@
                                 @endif
                                 effective {{ !empty($pendingChange['effective_at']) ? \Illuminate\Support\Carbon::parse($pendingChange['effective_at'])->format('M d, Y') : 'at the end of the billing cycle' }}.
                             </p>
+                        </div>
+                    @endif
+
+                    @if($subscriptionEvents->isNotEmpty())
+                        <div class="mt-6 rounded-2xl border border-gray-100 p-5">
+                            <h4 class="text-sm font-semibold text-gray-900">Subscription event history</h4>
+                            <div class="mt-4 space-y-3">
+                                @foreach($subscriptionEvents as $event)
+                                    <div class="flex items-start justify-between gap-4 rounded-xl bg-gray-50 px-4 py-3">
+                                        <div>
+                                            <p class="text-sm font-medium text-gray-900">{{ ucfirst(str_replace('_', ' ', $event->event_type)) }}</p>
+                                            <p class="text-xs text-gray-500">
+                                                {{ $event->fromPlan?->name ?? $subscription->plan?->name }}
+                                                @if($event->toPlan || $event->toPrice)
+                                                    to {{ $event->toPlan?->name ?? $event->toPrice?->name }}
+                                                @endif
+                                            </p>
+                                            @if($event->reason)
+                                                <p class="text-xs text-gray-500 mt-1">{{ $event->reason }}</p>
+                                            @endif
+                                        </div>
+                                        <div class="text-right">
+                                            <p class="text-xs font-medium text-gray-700">{{ strtoupper($event->source) }}</p>
+                                            <p class="text-xs text-gray-500">{{ $event->created_at->format('M d, Y H:i') }}</p>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+
+                    @if($invoiceHistory->isNotEmpty())
+                        <div class="mt-6 rounded-2xl border border-gray-100 p-5">
+                            <h4 class="text-sm font-semibold text-gray-900">Invoice history</h4>
+                            <div class="mt-4 space-y-3">
+                                @foreach($invoiceHistory as $invoice)
+                                    <div class="flex items-center justify-between gap-4 rounded-xl bg-gray-50 px-4 py-3">
+                                        <div>
+                                            <p class="text-sm font-medium text-gray-900">{{ $invoice->provider_invoice_id }}</p>
+                                            <p class="text-xs text-gray-500">{{ ucfirst(str_replace('_', ' ', $invoice->status)) }}</p>
+                                        </div>
+                                        <div class="text-right">
+                                            <p class="text-sm font-medium text-gray-900">{{ strtoupper($invoice->currency) }} {{ number_format($invoice->total / 100, 2) }}</p>
+                                            <p class="text-xs text-gray-500">{{ $invoice->issued_at?->format('M d, Y') ?? $invoice->created_at->format('M d, Y') }}</p>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+
+                    @if($refundHistory->isNotEmpty())
+                        <div class="mt-6 rounded-2xl border border-gray-100 p-5">
+                            <h4 class="text-sm font-semibold text-gray-900">Refund history</h4>
+                            <div class="mt-4 space-y-3">
+                                @foreach($refundHistory as $refund)
+                                    <div class="flex items-center justify-between gap-4 rounded-xl bg-gray-50 px-4 py-3">
+                                        <div>
+                                            <p class="text-sm font-medium text-gray-900">{{ $refund->provider_refund_id }}</p>
+                                            <p class="text-xs text-gray-500">{{ $refund->reason ?: 'No reason provided' }}</p>
+                                        </div>
+                                        <div class="text-right">
+                                            <p class="text-sm font-medium text-gray-900">{{ strtoupper($refund->currency) }} {{ number_format($refund->amount / 100, 2) }}</p>
+                                            <p class="text-xs text-gray-500">{{ $refund->refunded_at?->format('M d, Y') ?? $refund->created_at->format('M d, Y') }}</p>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
                         </div>
                     @endif
                 </div>

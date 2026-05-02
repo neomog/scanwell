@@ -1,16 +1,14 @@
 <?php
 
-use App\Http\Controllers\AuthController;
 use App\Http\Controllers\Api\BillingController as ApiBillingController;
+use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ProductContributionController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ScanController;
 use App\Http\Controllers\SocialAuthController;
 use App\Http\Controllers\StripeWebhookController;
 use App\Http\Controllers\UserPreferenceController;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-
 
 // Public routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -21,30 +19,29 @@ Route::post('/stripe/webhook', StripeWebhookController::class)->name('api.stripe
 
 // Protected routes
 Route::middleware('auth:sanctum', 'verified')->group(function () {
-//    Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
-//        ->middleware('signed')
-//        ->name('verification.verify');
+    //    Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
+    //        ->middleware('signed')
+    //        ->name('verification.verify');
     Route::post('/email/resend', [AuthController::class, 'resendVerification']);
 
     Route::get('/user', [AuthController::class, 'user']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
-
 });
 
 // oauth routes
 Route::prefix('auth')->group(function () {
-//    Route::post('/google', [SocialAuthController::class, 'googleAuth']);
+    //    Route::post('/google', [SocialAuthController::class, 'googleAuth']);
     Route::post('/google', [SocialAuthController::class, 'googleMobileAuth']);
-//    Route::get('/{provider}/redirect', [SocialAuthController::class, 'redirectToProvider']);
-//    Route::get('/{provider}/callback', [SocialAuthController::class, 'handleProviderCallback']);
+    //    Route::get('/{provider}/redirect', [SocialAuthController::class, 'redirectToProvider']);
+    //    Route::get('/{provider}/callback', [SocialAuthController::class, 'handleProviderCallback']);
 });
 
-//Route::prefix('v1')->group(function () {
+// Route::prefix('v1')->group(function () {
 //    // Product search (public)
 //    Route::get('/products/search', [ProductController::class, 'search']);
 //    Route::get('/products/{barcode}', [ProductController::class, 'show']);
-//});
+// });
 
 Route::prefix('v1')->group(function () {
     // Product search and view (public)
@@ -54,10 +51,13 @@ Route::prefix('v1')->group(function () {
     Route::get('/billing/plans', [ApiBillingController::class, 'plans']);
 });
 
-
 // Protected routes (require authentication)
 Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('/billing/subscription', [ApiBillingController::class, 'subscription']);
+    Route::get('/billing/history', [ApiBillingController::class, 'history']);
+    Route::get('/billing/invoices', [ApiBillingController::class, 'invoices']);
+    Route::get('/billing/transactions', [ApiBillingController::class, 'transactions']);
+    Route::get('/billing/failed-payments', [ApiBillingController::class, 'failedPayments']);
     Route::post('/billing/checkout', [ApiBillingController::class, 'checkout']);
     Route::post('/billing/cancel', [ApiBillingController::class, 'cancel']);
 

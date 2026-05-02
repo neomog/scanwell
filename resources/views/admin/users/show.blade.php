@@ -147,7 +147,7 @@
                         </div>
                         <div class="rounded-lg bg-gray-50 p-4">
                             <p class="text-xs text-gray-500">Period end</p>
-                            <p class="mt-2 text-lg font-semibold text-gray-900">{{ $currentSubscription->current_period_ends_at?->format('M d, Y') ?? 'No expiry' }}</p>
+                            <p class="mt-2 text-lg font-semibold text-gray-900">{{ $currentSubscription->display_expiry_at?->format('M d, Y') ?? 'No expiry' }}</p>
                         </div>
                     </div>
 
@@ -182,6 +182,68 @@
                                 @endif
                                 at {{ !empty($pendingChange['effective_at']) ? \Illuminate\Support\Carbon::parse($pendingChange['effective_at'])->format('M d, Y') : 'period end' }}.
                             </p>
+                        </div>
+                    @endif
+
+                    @if($failedInvoices->isNotEmpty())
+                        <div class="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
+                            <p class="text-sm font-semibold text-red-900">Failed payment attention needed</p>
+                            <p class="text-sm text-red-800 mt-1">
+                                Latest failed invoice:
+                                {{ strtoupper($failedInvoices->first()->currency) }}
+                                {{ number_format($failedInvoices->first()->amount_due / 100, 2) }}
+                                on {{ $failedInvoices->first()->failed_at?->format('M d, Y') }}.
+                            </p>
+                        </div>
+                    @endif
+
+                    @if($subscriptionEvents->isNotEmpty())
+                        <div class="mt-4">
+                            <p class="text-sm font-semibold text-gray-800 mb-3">Subscription event history</p>
+                            <div class="space-y-2">
+                                @foreach($subscriptionEvents as $event)
+                                    <div class="rounded-lg border border-gray-100 px-4 py-3">
+                                        <div class="flex items-start justify-between gap-4">
+                                            <div>
+                                                <p class="text-sm font-medium text-gray-900">{{ ucfirst(str_replace('_', ' ', $event->event_type)) }}</p>
+                                                <p class="text-xs text-gray-500">
+                                                    {{ $event->fromPlan?->name ?? $event->fromPrice?->name ?? 'Current state' }}
+                                                    @if($event->toPlan || $event->toPrice)
+                                                        to {{ $event->toPlan?->name ?? $event->toPrice?->name }}
+                                                    @endif
+                                                </p>
+                                                @if($event->reason)
+                                                    <p class="text-xs text-gray-500 mt-1">{{ $event->reason }}</p>
+                                                @endif
+                                            </div>
+                                            <div class="text-right">
+                                                <p class="text-xs font-medium text-gray-700">{{ strtoupper($event->source) }}</p>
+                                                <p class="text-xs text-gray-500">{{ $event->created_at->format('M d, Y H:i') }}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+
+                    @if($billingInvoices->isNotEmpty())
+                        <div class="mt-4">
+                            <p class="text-sm font-semibold text-gray-800 mb-3">Recent billing invoices</p>
+                            <div class="space-y-2">
+                                @foreach($billingInvoices as $invoice)
+                                    <div class="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-3">
+                                        <div>
+                                            <p class="text-sm font-medium text-gray-900">{{ $invoice->provider_invoice_id }}</p>
+                                            <p class="text-xs text-gray-500">{{ ucfirst(str_replace('_', ' ', $invoice->status)) }}</p>
+                                        </div>
+                                        <div class="text-right">
+                                            <p class="text-sm font-medium text-gray-900">{{ strtoupper($invoice->currency) }} {{ number_format($invoice->total / 100, 2) }}</p>
+                                            <p class="text-xs text-gray-500">{{ $invoice->issued_at?->format('M d, Y') ?? $invoice->created_at->format('M d, Y') }}</p>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
                         </div>
                     @endif
                 </div>
@@ -409,8 +471,9 @@
                                 @foreach($assignablePlans as $plan)
                                     <optgroup label="{{ $plan->name }}">
                                         @foreach($plan->prices as $price)
-                                            <option value="{{ $price->id }}">
-                                                {{ $plan->name }} / {{ $price->name }} / {{ $price->formattedAmount() }}
+                                            @php($isSelected = (string) old('price_id', $currentSubscription->price_id ?? '') === (string) $price->id)
+                                            <option value="{{ $price->id }}" {{ $isSelected ? 'selected' : '' }}>
+                                                {{ $plan->name }} / {{ $price->name }} / {{ $price->formattedAmount() }}{{ $isSelected ? ' (Current)' : '' }}
                                             </option>
                                         @endforeach
                                     </optgroup>
@@ -421,9 +484,9 @@
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-2">Transition type</label>
                             <select name="transition_type" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]" required>
-                                <option value="billing_now">Billing change now</option>
-                                <option value="billing_next_cycle">Billing change next cycle</option>
-                                <option value="manual_override">Manual override</option>
+                                <option value="billing_now" {{ old('transition_type', $currentSubscription->provider === 'stripe' ? 'billing_now' : 'manual_override') === 'billing_now' ? 'selected' : '' }}>Billing change now</option>
+                                <option value="billing_next_cycle" {{ old('transition_type') === 'billing_next_cycle' ? 'selected' : '' }}>Billing change next cycle</option>
+                                <option value="manual_override" {{ old('transition_type', $currentSubscription->provider === 'stripe' ? 'billing_now' : 'manual_override') === 'manual_override' ? 'selected' : '' }}>Manual override</option>
                             </select>
                         </div>
                     </div>
@@ -434,7 +497,7 @@
                     </div>
 
                     <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-4">
-                        <input type="checkbox" name="cancel_current_stripe" value="1" class="mt-1 rounded border-gray-300 text-[#1FA774] focus:ring-[#1FA774]">
+                        <input type="checkbox" name="cancel_current_stripe" value="1" class="mt-1 rounded border-gray-300 text-[#1FA774] focus:ring-[#1FA774]" {{ old('cancel_current_stripe') ? 'checked' : '' }}>
                         <span>
                             <span class="block text-sm font-medium text-gray-900">Cancel active Stripe subscription immediately when using manual override</span>
                             <span class="block text-xs text-gray-500 mt-1">Required for manual overrides on currently Stripe-managed paid users.</span>

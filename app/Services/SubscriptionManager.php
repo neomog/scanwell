@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\DB;
 
 class SubscriptionManager
 {
+    public function __construct(
+        protected SubscriptionEventService $subscriptionEventService
+    ) {}
+
     public function defaultPlan(): SubscriptionPlan
     {
         $configuredSlug = config('subscriptions.default_slug', 'free');
@@ -95,11 +99,18 @@ class SubscriptionManager
         bool $replaceCurrent = true
     ): Subscription {
         return DB::transaction(function () use ($user, $plan, $price, $attributes, $replaceCurrent) {
+            $previousSubscription = $replaceCurrent
+                ? $user->subscriptions()->with(['plan', 'price'])->current()->latest('created_at')->first()
+                : null;
+
+            $audit = (array) ($attributes['audit'] ?? []);
+            unset($attributes['audit']);
+
             if ($replaceCurrent) {
                 $this->retireCurrentSubscriptions($user);
             }
 
-            return Subscription::create(array_merge([
+            $subscription = Subscription::create(array_merge([
                 'user_id' => $user->id,
                 'plan_id' => $plan->id,
                 'price_id' => $price?->id,
@@ -112,6 +123,28 @@ class SubscriptionManager
                 'current_period_starts_at' => now(),
                 'current_period_ends_at' => null,
             ], $attributes));
+
+            $eventType = $audit['event_type'] ?? $this->inferAssignmentEventType($attributes);
+
+            if ($eventType) {
+                $this->subscriptionEventService->record($user, $subscription, $eventType, [
+                    'source' => $audit['source'] ?? 'system',
+                    'actor_id' => $audit['actor_id'] ?? null,
+                    'from_plan_id' => $previousSubscription?->plan_id,
+                    'to_plan_id' => $subscription->plan_id,
+                    'from_price_id' => $previousSubscription?->price_id,
+                    'to_price_id' => $subscription->price_id,
+                    'status_before' => $previousSubscription?->status,
+                    'status_after' => $subscription->status,
+                    'reason' => $audit['reason'] ?? data_get($attributes, 'metadata.reason'),
+                    'effective_at' => $audit['effective_at'] ?? $subscription->starts_at,
+                    'metadata' => array_merge([
+                        'assigned_reason' => data_get($attributes, 'metadata.assigned_reason'),
+                    ], (array) ($audit['metadata'] ?? [])),
+                ]);
+            }
+
+            return $subscription;
         });
     }
 
@@ -151,7 +184,7 @@ class SubscriptionManager
 
     public function ensureFeature(User $user, string $feature, ?string $message = null): void
     {
-        if (!$this->can($user, $feature)) {
+        if (! $this->can($user, $feature)) {
             throw new PlanFeatureException(
                 $feature,
                 $message ?? 'This feature is not available on your current plan.'
@@ -214,7 +247,15 @@ class SubscriptionManager
                 ->where('stripe_subscription_id', $stripeSubscription->id)
                 ->first();
 
-            if (!$subscription) {
+            $wasExisting = (bool) $subscription;
+            $previous = $subscription ? [
+                'plan_id' => $subscription->plan_id,
+                'price_id' => $subscription->price_id,
+                'status' => $subscription->status,
+                'current_period_ends_at' => $subscription->current_period_ends_at?->getTimestamp(),
+            ] : null;
+
+            if (! $subscription) {
                 $this->retireCurrentSubscriptions($user);
                 $subscription = new Subscription([
                     'user_id' => $user->id,
@@ -278,9 +319,38 @@ class SubscriptionManager
                     ->current()
                     ->exists();
 
-                if (!$hasCurrentPaidSubscription) {
+                if (! $hasCurrentPaidSubscription) {
                     $this->ensureDefaultSubscription($user);
                 }
+            }
+
+            $eventType = null;
+
+            if (! $wasExisting) {
+                $eventType = 'subscription_started';
+            } elseif (($previous['plan_id'] ?? null) !== $subscription->plan_id || ($previous['price_id'] ?? null) !== $subscription->price_id) {
+                $eventType = 'subscription_plan_changed';
+            } elseif (($previous['status'] ?? null) !== $subscription->status) {
+                $eventType = 'subscription_status_changed';
+            } elseif (($previous['current_period_ends_at'] ?? null) !== $subscription->current_period_ends_at?->getTimestamp()) {
+                $eventType = 'subscription_renewed';
+            }
+
+            if ($eventType) {
+                $this->subscriptionEventService->record($user, $subscription, $eventType, [
+                    'source' => 'webhook',
+                    'from_plan_id' => $previous['plan_id'] ?? $subscription->plan_id,
+                    'to_plan_id' => $subscription->plan_id,
+                    'from_price_id' => $previous['price_id'] ?? $subscription->price_id,
+                    'to_price_id' => $subscription->price_id,
+                    'status_before' => $previous['status'] ?? null,
+                    'status_after' => $subscription->status,
+                    'effective_at' => $subscription->current_period_starts_at ?? $subscription->starts_at,
+                    'metadata' => [
+                        'stripe_status' => $stripeSubscription->status ?? null,
+                        'stripe_subscription_id' => $subscription->stripe_subscription_id,
+                    ],
+                ]);
             }
 
             return $subscription->loadMissing(['plan', 'price']);
@@ -297,6 +367,17 @@ class SubscriptionManager
             'unpaid' => Subscription::STATUS_UNPAID,
             'incomplete', 'incomplete_expired' => Subscription::STATUS_INCOMPLETE,
             default => Subscription::STATUS_ACTIVE,
+        };
+    }
+
+    protected function inferAssignmentEventType(array $attributes): ?string
+    {
+        return match (data_get($attributes, 'metadata.assigned_reason')) {
+            'default_plan' => 'default_plan_assigned',
+            'manual_override' => 'manual_override_applied',
+            'admin_billing_change' => 'admin_billing_change_applied',
+            'scheduled_plan_change' => 'scheduled_plan_change_applied',
+            default => data_get($attributes, 'provider') === 'system' ? 'subscription_assigned' : null,
         };
     }
 }

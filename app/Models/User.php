@@ -5,9 +5,9 @@ namespace App\Models;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -16,7 +16,7 @@ use Laravel\Sanctum\HasApiTokens;
 class User extends Authenticatable implements MustVerifyEmail
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasApiTokens, HasUuids, HasFactory, Notifiable, SoftDeletes;
+    use HasApiTokens, HasFactory, HasUuids, Notifiable, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.
@@ -111,11 +111,30 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasMany(Subscription::class);
     }
 
+    public function subscriptionEvents(): HasMany
+    {
+        return $this->hasMany(SubscriptionEvent::class);
+    }
+
+    public function billingInvoices(): HasMany
+    {
+        return $this->hasMany(BillingInvoice::class);
+    }
+
+    public function billingTransactions(): HasMany
+    {
+        return $this->hasMany(BillingTransaction::class);
+    }
+
+    public function billingRefunds(): HasMany
+    {
+        return $this->hasMany(BillingRefund::class);
+    }
+
     public function currentSubscription(): HasOne
     {
         return $this->hasOne(Subscription::class)
             ->whereIn('status', Subscription::CURRENT_STATUSES)
             ->latestOfMany('created_at');
     }
-
 }

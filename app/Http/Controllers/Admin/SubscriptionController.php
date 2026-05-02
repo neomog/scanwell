@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Subscription;
 use App\Models\SubscriptionPlan;
+use App\Services\BillingSyncService;
 use App\Services\StripeSubscriptionService;
+use App\Services\SubscriptionEventService;
 use App\Services\SubscriptionManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,9 +18,10 @@ class SubscriptionController extends Controller
 {
     public function __construct(
         protected StripeSubscriptionService $stripeSubscriptionService,
-        protected SubscriptionManager $subscriptionManager
-    ) {
-    }
+        protected SubscriptionManager $subscriptionManager,
+        protected SubscriptionEventService $subscriptionEventService,
+        protected BillingSyncService $billingSyncService
+    ) {}
 
     public function index(Request $request): View
     {
@@ -70,6 +73,19 @@ class SubscriptionController extends Controller
 
         return view('admin.subscriptions.show', [
             'subscription' => $subscription,
+            'subscriptionEvents' => $subscription->events()
+                ->with(['actor', 'fromPlan', 'toPlan', 'fromPrice', 'toPrice'])
+                ->latest()
+                ->limit(10)
+                ->get(),
+            'invoiceHistory' => $subscription->invoices()
+                ->latest('issued_at')
+                ->limit(10)
+                ->get(),
+            'refundHistory' => $subscription->refunds()
+                ->latest('refunded_at')
+                ->limit(10)
+                ->get(),
         ]);
     }
 
@@ -77,11 +93,12 @@ class SubscriptionController extends Controller
     {
         $subscription->loadMissing(['user', 'plan', 'price']);
 
-        if (!$subscription->isPaid() || !$subscription->stripe_subscription_id) {
+        if (! $subscription->isPaid() || ! $subscription->stripe_subscription_id) {
             return back()->with('error', 'Only Stripe-managed paid subscriptions can be canceled.');
         }
 
         $immediately = $request->boolean('immediately');
+        $previousStatus = $subscription->status;
 
         try {
             $stripeSubscription = $this->stripeSubscriptionService->cancel($subscription, $immediately);
@@ -99,6 +116,23 @@ class SubscriptionController extends Controller
             if ($immediately) {
                 $this->subscriptionManager->ensureDefaultSubscription($subscription->user);
             }
+
+            $this->subscriptionEventService->record($subscription->user, $subscription, $immediately
+                ? 'admin_canceled_immediately'
+                : 'admin_canceled_at_period_end', [
+                    'source' => 'admin',
+                    'actor_id' => auth()->id(),
+                    'from_plan_id' => $subscription->plan_id,
+                    'to_plan_id' => $subscription->plan_id,
+                    'from_price_id' => $subscription->price_id,
+                    'to_price_id' => $subscription->price_id,
+                    'status_before' => $previousStatus,
+                    'status_after' => $subscription->status,
+                    'effective_at' => $subscription->display_expiry_at,
+                    'metadata' => [
+                        'stripe_subscription_id' => $subscription->stripe_subscription_id,
+                    ],
+                ]);
 
             return back()->with('success', $immediately
                 ? 'Subscription canceled immediately.'
@@ -128,7 +162,7 @@ class SubscriptionController extends Controller
 
             $subscription->update([
                 'refunded_at' => now(),
-                'status' => $isFullRefund && !$subscription->isCurrent()
+                'status' => $isFullRefund && ! $subscription->isCurrent()
                     ? Subscription::STATUS_REFUNDED
                     : $subscription->status,
                 'metadata' => array_merge($subscription->metadata ?? [], [
@@ -139,6 +173,32 @@ class SubscriptionController extends Controller
                         'reason' => $validated['reason'] ?? null,
                     ],
                 ]),
+            ]);
+
+            $this->billingSyncService->recordRefundFromStripe(
+                $subscription,
+                $refund,
+                $validated['reason'] ?? null,
+                'admin',
+                (string) auth()->id()
+            );
+
+            $this->subscriptionEventService->record($subscription->user, $subscription, 'admin_refund_created', [
+                'source' => 'admin',
+                'actor_id' => auth()->id(),
+                'from_plan_id' => $subscription->plan_id,
+                'to_plan_id' => $subscription->plan_id,
+                'from_price_id' => $subscription->price_id,
+                'to_price_id' => $subscription->price_id,
+                'status_before' => $subscription->status,
+                'status_after' => $subscription->status,
+                'reason' => $validated['reason'] ?? null,
+                'effective_at' => now(),
+                'metadata' => [
+                    'refund_id' => $refund->id,
+                    'amount' => $refund->amount,
+                    'refund_status' => $refund->status,
+                ],
             ]);
 
             return back()->with('success', 'Refund request created successfully.');

@@ -6,7 +6,9 @@ use App\Models\Subscription;
 use App\Models\SubscriptionPlan;
 use App\Models\SubscriptionPrice;
 use App\Models\User;
+use App\Services\BillingSyncService;
 use App\Services\StripeSubscriptionService;
+use App\Services\SubscriptionEventService;
 use App\Services\SubscriptionManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,7 +20,9 @@ class StripeWebhookController extends Controller
     public function __invoke(
         Request $request,
         StripeSubscriptionService $stripeSubscriptionService,
-        SubscriptionManager $subscriptionManager
+        SubscriptionManager $subscriptionManager,
+        BillingSyncService $billingSyncService,
+        SubscriptionEventService $subscriptionEventService
     ): JsonResponse {
         $signature = (string) $request->header('Stripe-Signature');
 
@@ -48,7 +52,16 @@ class StripeWebhookController extends Controller
                 $stripeSubscriptionService,
                 $subscriptionManager
             ),
-            'invoice.payment_succeeded' => $this->handleInvoicePaid($event->data->object),
+            'invoice.payment_succeeded' => $this->handleInvoicePaid(
+                $event->data->object,
+                $billingSyncService,
+                $subscriptionEventService
+            ),
+            'invoice.payment_failed' => $this->handleInvoicePaymentFailed(
+                $event->data->object,
+                $billingSyncService,
+                $subscriptionEventService
+            ),
             default => null,
         };
 
@@ -68,7 +81,7 @@ class StripeWebhookController extends Controller
         $plan = SubscriptionPlan::find(data_get($session, 'metadata.plan_id'));
         $price = SubscriptionPrice::find(data_get($session, 'metadata.price_id'));
 
-        if (!$user || !$plan || !$price) {
+        if (! $user || ! $plan || ! $price) {
             return;
         }
 
@@ -95,7 +108,7 @@ class StripeWebhookController extends Controller
         $plan = SubscriptionPlan::find(data_get($stripeSubscription, 'metadata.plan_id') ?: $localSubscription?->plan_id);
         $price = SubscriptionPrice::find(data_get($stripeSubscription, 'metadata.price_id') ?: $localSubscription?->price_id);
 
-        if (!$user || !$plan || !$price) {
+        if (! $user || ! $plan || ! $price) {
             return;
         }
 
@@ -115,7 +128,7 @@ class StripeWebhookController extends Controller
         $plan = SubscriptionPlan::find(data_get($stripeSubscription, 'metadata.plan_id') ?: $localSubscription?->plan_id);
         $price = SubscriptionPrice::find(data_get($stripeSubscription, 'metadata.price_id') ?: $localSubscription?->price_id);
 
-        if (!$user || !$plan || !$price) {
+        if (! $user || ! $plan || ! $price) {
             return;
         }
 
@@ -134,14 +147,14 @@ class StripeWebhookController extends Controller
             $price,
             $stripeSubscription,
             [],
-            !$shouldSuppressDefaultAssignment
+            ! $shouldSuppressDefaultAssignment
         );
 
-        if (!$shouldSuppressDefaultAssignment || !$pendingPlan) {
+        if (! $shouldSuppressDefaultAssignment || ! $pendingPlan) {
             return;
         }
 
-        if ($pendingType === 'stripe_recreate' && $pendingPrice && !$pendingPrice->isFree()) {
+        if ($pendingType === 'stripe_recreate' && $pendingPrice && ! $pendingPrice->isFree()) {
             try {
                 $newStripeSubscription = $stripeSubscriptionService->createSubscriptionForCustomer(
                     (string) $stripeSubscription->customer,
@@ -181,18 +194,41 @@ class StripeWebhookController extends Controller
                 'reason' => $pendingReason,
                 'admin_id' => $pendingAdminId,
             ],
+            'audit' => [
+                'event_type' => 'scheduled_plan_change_applied',
+                'source' => 'webhook',
+                'actor_id' => $pendingAdminId,
+                'reason' => $pendingReason,
+                'metadata' => [
+                    'transition_type' => 'billing_next_cycle',
+                ],
+            ],
         ]);
     }
 
-    protected function handleInvoicePaid(object $invoice): void
-    {
+    protected function handleInvoicePaid(
+        object $invoice,
+        BillingSyncService $billingSyncService,
+        SubscriptionEventService $subscriptionEventService
+    ): void {
         $subscription = Subscription::query()
+            ->with('user')
             ->where('stripe_subscription_id', $invoice->subscription ?? null)
             ->first();
 
-        if (!$subscription) {
+        if (! $subscription || ! $subscription->user) {
             return;
         }
+
+        $billingInvoice = $billingSyncService->syncInvoiceFromStripe($subscription->user, $subscription, $invoice, 'paid');
+        $billingSyncService->syncInvoiceTransaction(
+            $subscription->user,
+            $subscription,
+            $billingInvoice,
+            $invoice,
+            'succeeded',
+            'Subscription invoice paid'
+        );
 
         $subscription->update([
             'stripe_invoice_id' => $invoice->id ?? $subscription->stripe_invoice_id,
@@ -207,6 +243,74 @@ class StripeWebhookController extends Controller
                         : null,
                 ],
             ]),
+        ]);
+
+        $subscriptionEventService->record($subscription->user, $subscription, 'invoice_paid', [
+            'source' => 'webhook',
+            'from_plan_id' => $subscription->plan_id,
+            'to_plan_id' => $subscription->plan_id,
+            'from_price_id' => $subscription->price_id,
+            'to_price_id' => $subscription->price_id,
+            'status_before' => $subscription->status,
+            'status_after' => $subscription->status,
+            'effective_at' => $billingInvoice?->paid_at,
+            'metadata' => [
+                'invoice_id' => $invoice->id ?? null,
+                'payment_intent_id' => $invoice->payment_intent ?? null,
+                'amount_paid' => $invoice->amount_paid ?? null,
+            ],
+        ]);
+    }
+
+    protected function handleInvoicePaymentFailed(
+        object $invoice,
+        BillingSyncService $billingSyncService,
+        SubscriptionEventService $subscriptionEventService
+    ): void {
+        $subscription = Subscription::query()
+            ->with('user')
+            ->where('stripe_subscription_id', $invoice->subscription ?? null)
+            ->first();
+
+        if (! $subscription || ! $subscription->user) {
+            return;
+        }
+
+        $billingInvoice = $billingSyncService->syncInvoiceFromStripe($subscription->user, $subscription, $invoice, 'payment_failed');
+        $billingSyncService->syncInvoiceTransaction(
+            $subscription->user,
+            $subscription,
+            $billingInvoice,
+            $invoice,
+            'failed',
+            'Subscription invoice payment failed'
+        );
+
+        $subscription->update([
+            'metadata' => array_merge($subscription->metadata ?? [], [
+                'last_invoice' => [
+                    'id' => $invoice->id ?? null,
+                    'status' => 'payment_failed',
+                    'amount_due' => $invoice->amount_due ?? null,
+                    'failed_at' => now()->toIso8601String(),
+                ],
+            ]),
+        ]);
+
+        $subscriptionEventService->record($subscription->user, $subscription, 'payment_failed', [
+            'source' => 'webhook',
+            'from_plan_id' => $subscription->plan_id,
+            'to_plan_id' => $subscription->plan_id,
+            'from_price_id' => $subscription->price_id,
+            'to_price_id' => $subscription->price_id,
+            'status_before' => $subscription->status,
+            'status_after' => $subscription->status,
+            'effective_at' => now(),
+            'metadata' => [
+                'invoice_id' => $invoice->id ?? null,
+                'payment_intent_id' => $invoice->payment_intent ?? null,
+                'amount_due' => $invoice->amount_due ?? null,
+            ],
         ]);
     }
 }

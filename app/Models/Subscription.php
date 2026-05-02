@@ -6,19 +6,32 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Subscription extends Model
 {
     use HasFactory, HasUuids;
 
+    protected $appends = [
+        'display_expiry_at',
+    ];
+
     public const STATUS_TRIALING = 'trialing';
+
     public const STATUS_ACTIVE = 'active';
+
     public const STATUS_PAST_DUE = 'past_due';
+
     public const STATUS_CANCELING = 'canceling';
+
     public const STATUS_CANCELED = 'canceled';
+
     public const STATUS_INCOMPLETE = 'incomplete';
+
     public const STATUS_UNPAID = 'unpaid';
+
     public const STATUS_REPLACED = 'replaced';
+
     public const STATUS_REFUNDED = 'refunded';
 
     public const CURRENT_STATUSES = [
@@ -84,6 +97,26 @@ class Subscription extends Model
         return $this->belongsTo(SubscriptionPrice::class, 'price_id');
     }
 
+    public function events(): HasMany
+    {
+        return $this->hasMany(SubscriptionEvent::class);
+    }
+
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(BillingInvoice::class);
+    }
+
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(BillingTransaction::class);
+    }
+
+    public function refunds(): HasMany
+    {
+        return $this->hasMany(BillingRefund::class);
+    }
+
     public function scopeCurrent($query)
     {
         return $query->whereIn('status', self::CURRENT_STATUSES);
@@ -97,5 +130,10 @@ class Subscription extends Model
     public function isCurrent(): bool
     {
         return in_array($this->status, self::CURRENT_STATUSES, true);
+    }
+
+    public function getDisplayExpiryAtAttribute()
+    {
+        return $this->ends_at ?? $this->current_period_ends_at;
     }
 }

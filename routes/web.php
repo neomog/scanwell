@@ -1,14 +1,15 @@
 <?php
 
-use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\BillingController;
+use App\Http\Controllers\Admin\BillingController as AdminBillingController;
 use App\Http\Controllers\Admin\ContributionModerationController;
 use App\Http\Controllers\Admin\LeaderboardController;
 use App\Http\Controllers\Admin\ProductManagementController;
 use App\Http\Controllers\Admin\SubscriptionController;
 use App\Http\Controllers\Admin\SubscriptionPlanController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\BillingController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ProfileController;
 use App\Http\Middleware\AdminMiddleware;
 use Illuminate\Support\Facades\Route;
 
@@ -65,6 +66,12 @@ Route::middleware(['auth', AdminMiddleware::class])
         Route::get('/subscriptions/{subscription}', [SubscriptionController::class, 'show'])->name('subscriptions.show');
         Route::post('/subscriptions/{subscription}/cancel', [SubscriptionController::class, 'cancel'])->name('subscriptions.cancel');
         Route::post('/subscriptions/{subscription}/refund', [SubscriptionController::class, 'refund'])->name('subscriptions.refund');
+
+        Route::get('/billing', [AdminBillingController::class, 'index'])->name('billing.index');
+        Route::get('/billing/invoices', [AdminBillingController::class, 'invoices'])->name('billing.invoices');
+        Route::get('/billing/transactions', [AdminBillingController::class, 'transactions'])->name('billing.transactions');
+        Route::get('/billing/refunds', [AdminBillingController::class, 'refunds'])->name('billing.refunds');
+        Route::get('/billing/failures', [AdminBillingController::class, 'failures'])->name('billing.failures');
 
         Route::get('/users', [UserController::class, 'index'])->name('users.index');
         Route::get('/users/create', [UserController::class, 'create'])

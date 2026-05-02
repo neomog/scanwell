@@ -10,6 +10,7 @@ use App\Models\SubscriptionPlan;
 use App\Models\SubscriptionPrice;
 use App\Models\User;
 use App\Services\StripeSubscriptionService;
+use App\Services\SubscriptionEventService;
 use App\Services\SubscriptionManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -20,9 +21,9 @@ class UserController extends Controller
 {
     public function __construct(
         protected SubscriptionManager $subscriptionManager,
-        protected StripeSubscriptionService $stripeSubscriptionService
-    ) {
-    }
+        protected StripeSubscriptionService $stripeSubscriptionService,
+        protected SubscriptionEventService $subscriptionEventService
+    ) {}
 
     // List all users
     public function index(Request $request)
@@ -116,6 +117,23 @@ class UserController extends Controller
         $subscriptionHistory = $user->subscriptions()
             ->with(['plan', 'price'])
             ->latest('created_at')
+            ->limit(10)
+            ->get();
+
+        $subscriptionEvents = $user->subscriptionEvents()
+            ->with(['actor', 'fromPlan', 'toPlan', 'fromPrice', 'toPrice'])
+            ->latest()
+            ->limit(10)
+            ->get();
+
+        $billingInvoices = $user->billingInvoices()
+            ->latest('issued_at')
+            ->limit(10)
+            ->get();
+
+        $failedInvoices = $user->billingInvoices()
+            ->whereNotNull('failed_at')
+            ->latest('failed_at')
             ->limit(5)
             ->get();
 
@@ -139,6 +157,9 @@ class UserController extends Controller
             'recentContributions',
             'currentSubscription',
             'subscriptionHistory',
+            'subscriptionEvents',
+            'billingInvoices',
+            'failedInvoices',
             'assignablePlans'
         ));
     }
@@ -152,7 +173,7 @@ class UserController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email,' . $user->id,
+            'email' => 'required|email|unique:users,email,'.$user->id,
             'role' => 'required|in:user,admin',
         ]);
 
@@ -166,7 +187,7 @@ class UserController extends Controller
     // Ban / Unban user
     public function toggleBan(User $user)
     {
-        $user->is_banned = !$user->is_banned;
+        $user->is_banned = ! $user->is_banned;
         $user->save();
 
         return back()->with('success', 'User status updated');
@@ -189,7 +210,7 @@ class UserController extends Controller
         $user->password = Hash::make($newPassword);
         $user->save();
 
-        return back()->with('success', 'Password reset to: ' . $newPassword);
+        return back()->with('success', 'Password reset to: '.$newPassword);
     }
 
     public function toggleRole(User $user)
@@ -276,7 +297,7 @@ class UserController extends Controller
         bool $cancelCurrentStripe
     ) {
         if ($currentSubscription->provider === 'stripe' && $currentSubscription->isCurrent()) {
-            if (!$cancelCurrentStripe) {
+            if (! $cancelCurrentStripe) {
                 return back()->with('error', 'Manual overrides for active Stripe subscriptions require explicit immediate cancellation of the current Stripe billing.');
             }
 
@@ -296,6 +317,15 @@ class UserController extends Controller
                 'assigned_reason' => 'manual_override',
                 'reason' => $reason,
                 'admin_id' => auth()->id(),
+            ],
+            'audit' => [
+                'event_type' => 'manual_override_applied',
+                'source' => 'admin',
+                'actor_id' => auth()->id(),
+                'reason' => $reason,
+                'metadata' => [
+                    'transition_type' => 'manual_override',
+                ],
             ],
         ]);
 
@@ -327,14 +357,39 @@ class UserController extends Controller
                     'reason' => $reason,
                     'admin_id' => auth()->id(),
                 ],
+                'audit' => [
+                    'event_type' => 'admin_billing_change_applied',
+                    'source' => 'admin',
+                    'actor_id' => auth()->id(),
+                    'reason' => $reason,
+                    'metadata' => [
+                        'transition_type' => 'billing_now',
+                    ],
+                ],
             ]);
 
             return back()->with('success', 'User moved to the selected free plan immediately.');
         }
 
-        if ($currentSubscription->provider !== 'stripe' || !$currentSubscription->stripe_subscription_id) {
+        if ($currentSubscription->provider !== 'stripe' || ! $currentSubscription->stripe_subscription_id) {
             return back()->with('error', 'Immediate paid billing changes are only supported for Stripe-managed subscriptions. Use a manual override instead.');
         }
+
+        $this->subscriptionEventService->record($user, $currentSubscription, 'admin_billing_change_requested', [
+            'source' => 'admin',
+            'actor_id' => auth()->id(),
+            'from_plan_id' => $currentSubscription->plan_id,
+            'to_plan_id' => $plan->id,
+            'from_price_id' => $currentSubscription->price_id,
+            'to_price_id' => $price->id,
+            'status_before' => $currentSubscription->status,
+            'status_after' => $currentSubscription->status,
+            'reason' => $reason,
+            'effective_at' => now(),
+            'metadata' => [
+                'transition_type' => 'billing_now',
+            ],
+        ]);
 
         $stripeSubscription = $this->stripeSubscriptionService->updateSubscriptionPrice(
             $currentSubscription,
@@ -370,9 +425,25 @@ class UserController extends Controller
         SubscriptionPrice $price,
         ?string $reason
     ) {
-        if ($currentSubscription->provider !== 'stripe' || !$currentSubscription->stripe_subscription_id) {
+        if ($currentSubscription->provider !== 'stripe' || ! $currentSubscription->stripe_subscription_id) {
             return back()->with('error', 'End-of-cycle billing changes are only supported for Stripe-managed subscriptions.');
         }
+
+        $this->subscriptionEventService->record($user, $currentSubscription, 'admin_scheduled_plan_change_requested', [
+            'source' => 'admin',
+            'actor_id' => auth()->id(),
+            'from_plan_id' => $currentSubscription->plan_id,
+            'to_plan_id' => $plan->id,
+            'from_price_id' => $currentSubscription->price_id,
+            'to_price_id' => $price->id,
+            'status_before' => $currentSubscription->status,
+            'status_after' => Subscription::STATUS_CANCELING,
+            'reason' => $reason,
+            'effective_at' => $currentSubscription->current_period_ends_at,
+            'metadata' => [
+                'transition_type' => 'billing_next_cycle',
+            ],
+        ]);
 
         $stripeSubscription = $this->stripeSubscriptionService->schedulePlanChangeAtPeriodEnd(
             $currentSubscription,

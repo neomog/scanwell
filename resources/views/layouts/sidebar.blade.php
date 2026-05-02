@@ -139,9 +139,9 @@
 
         <a href="{{ route('admin.subscriptions.index') }}"
            class="flex items-center gap-3 px-3 py-2 rounded-lg transition
-           {{ request()->routeIs('admin.subscriptions.*')
-                ? 'bg-gray-200 text-gray-900 font-semibold'
-                : 'text-gray-600 hover:bg-gray-100' }}">
+            {{ request()->routeIs('admin.subscriptions.*')
+                 ? 'bg-gray-200 text-gray-900 font-semibold'
+                 : 'text-gray-600 hover:bg-gray-100' }}">
 
             <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -149,6 +149,20 @@
             </svg>
 
             <span x-show="sidebarOpen">Subscriptions</span>
+        </a>
+
+        <a href="{{ route('admin.billing.index') }}"
+           class="flex items-center gap-3 px-3 py-2 rounded-lg transition
+            {{ request()->routeIs('admin.billing.*')
+                 ? 'bg-gray-200 text-gray-900 font-semibold'
+                 : 'text-gray-600 hover:bg-gray-100' }}">
+
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 8c-2.761 0-5 1.343-5 3v7h10v-7c0-1.657-2.239-3-5-3zm0-5a2 2 0 100 4 2 2 0 000-4zM5 18h14M4 21h16"/>
+            </svg>
+
+            <span x-show="sidebarOpen">Billing</span>
         </a>
 
     </nav>

@@ -100,7 +100,7 @@
                                         </span>
                                     </td>
                                     <td class="px-6 py-4 text-sm text-gray-500">
-                                        {{ $subscription->current_period_ends_at?->format('M d, Y') ?? $subscription->ends_at?->format('M d, Y') ?? 'No expiry' }}
+                                        {{ $subscription->display_expiry_at?->format('M d, Y') ?? 'No expiry' }}
                                     </td>
                                     <td class="px-6 py-4 text-right">
                                         <a href="{{ route('admin.subscriptions.show', $subscription) }}" class="text-sm font-medium text-[#1FA774] hover:text-[#0D8B5E] transition">
