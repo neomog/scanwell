@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\ProductContribution;
+use App\Models\Role;
 use App\Models\Scan;
 use App\Models\Subscription;
 use App\Models\SubscriptionPlan;
@@ -28,7 +29,9 @@ class UserController extends Controller
     // List all users
     public function index(Request $request)
     {
-        $query = User::query();
+        abort_unless($request->user()->can('users.view'), 403);
+
+        $query = User::query()->with('roleDefinition');
 
         // Search
         if ($request->search) {
@@ -41,19 +44,36 @@ class UserController extends Controller
             $query->where('role', $request->role);
         }
 
+        if ($request->status === 'active') {
+            $query->where('is_banned', false);
+        }
+
+        if ($request->status === 'banned') {
+            $query->where('is_banned', true);
+        }
+
         $users = $query->latest()->paginate(10);
 
-        return view('admin.users.index', compact('users'));
+        return view('admin.users.index', [
+            'users' => $users,
+            'roles' => Role::query()->orderBy('name')->get(),
+        ]);
     }
 
     public function store(Request $request)
     {
+        abort_unless($request->user()->can('users.manage'), 403);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:8|confirmed',
-            'role' => 'required|in:user,admin',
+            'role' => 'required|exists:roles,slug',
         ]);
+
+        if (! $request->user()->hasRole('super_admin') && $validated['role'] === 'super_admin') {
+            abort(403);
+        }
 
         $user = User::create([
             'name' => $validated['name'],
@@ -72,8 +92,17 @@ class UserController extends Controller
             ->with('success', 'User created successfully.');
     }
 
+    public function create()
+    {
+        abort_unless(request()->user()->can('users.manage'), 403);
+
+        return redirect()->route('admin.users.index');
+    }
+
     public function show(User $user)
     {
+        abort_unless(request()->user()->can('users.view'), 403);
+
         $totalContributions = ProductContribution::where('user_id', $user->id)->count();
 
         $pendingContributions = ProductContribution::where('user_id', $user->id)
@@ -110,41 +139,58 @@ class UserController extends Controller
             ->limit(5)
             ->get();
 
-        $currentSubscription = $this->subscriptionManager
-            ->currentSubscription($user)
-            ->loadMissing(['plan', 'price']);
+        $viewer = request()->user();
+        $canViewBilling = $viewer->can('billing.view');
+        $canManageSubscriptions = $viewer->can('subscriptions.manage');
 
-        $subscriptionHistory = $user->subscriptions()
-            ->with(['plan', 'price'])
-            ->latest('created_at')
-            ->limit(10)
-            ->get();
+        $currentSubscription = null;
+        $subscriptionHistory = collect();
+        $subscriptionEvents = collect();
+        $billingInvoices = collect();
+        $failedInvoices = collect();
+        $assignablePlans = collect();
 
-        $subscriptionEvents = $user->subscriptionEvents()
-            ->with(['actor', 'fromPlan', 'toPlan', 'fromPrice', 'toPrice'])
-            ->latest()
-            ->limit(10)
-            ->get();
+        if ($canManageSubscriptions || $canViewBilling) {
+            $currentSubscription = $this->subscriptionManager
+                ->currentSubscription($user)
+                ->loadMissing(['plan', 'price']);
 
-        $billingInvoices = $user->billingInvoices()
-            ->latest('issued_at')
-            ->limit(10)
-            ->get();
+            $subscriptionHistory = $user->subscriptions()
+                ->with(['plan', 'price'])
+                ->latest('created_at')
+                ->limit(10)
+                ->get();
+        }
 
-        $failedInvoices = $user->billingInvoices()
-            ->whereNotNull('failed_at')
-            ->latest('failed_at')
-            ->limit(5)
-            ->get();
+        if ($canViewBilling) {
+            $subscriptionEvents = $user->subscriptionEvents()
+                ->with(['actor', 'fromPlan', 'toPlan', 'fromPrice', 'toPrice'])
+                ->latest()
+                ->limit(10)
+                ->get();
 
-        $assignablePlans = SubscriptionPlan::query()
-            ->where('is_active', true)
-            ->with(['prices' => fn ($query) => $query
+            $billingInvoices = $user->billingInvoices()
+                ->latest('issued_at')
+                ->limit(10)
+                ->get();
+
+            $failedInvoices = $user->billingInvoices()
+                ->whereNotNull('failed_at')
+                ->latest('failed_at')
+                ->limit(5)
+                ->get();
+        }
+
+        if ($canManageSubscriptions) {
+            $assignablePlans = SubscriptionPlan::query()
                 ->where('is_active', true)
-                ->orderByDesc('is_default')
-                ->orderBy('amount')])
-            ->orderBy('display_order')
-            ->get();
+                ->with(['prices' => fn ($query) => $query
+                    ->where('is_active', true)
+                    ->orderByDesc('is_default')
+                    ->orderBy('amount')])
+                ->orderBy('display_order')
+                ->get();
+        }
 
         return view('admin.users.show', compact(
             'user',
@@ -161,21 +207,40 @@ class UserController extends Controller
             'billingInvoices',
             'failedInvoices',
             'assignablePlans'
-        ));
+        ) + [
+            'roles' => Role::query()->orderBy('name')->get(),
+            'canViewBilling' => $canViewBilling,
+            'canManageSubscriptions' => $canManageSubscriptions,
+        ]);
     }
 
     public function edit(User $user)
     {
-        return view('admin.users.edit', compact('user'));
+        abort_unless(request()->user()->can('users.manage'), 403);
+
+        return view('admin.users.edit', [
+            'user' => $user->load('roleDefinition'),
+            'roles' => Role::query()->orderBy('name')->get(),
+        ]);
     }
 
     public function update(Request $request, User $user)
     {
+        abort_unless($request->user()->can('users.manage'), 403);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email,'.$user->id,
-            'role' => 'required|in:user,admin',
+            'role' => 'required|exists:roles,slug',
         ]);
+
+        if (! $request->user()->hasRole('super_admin') && $validated['role'] === 'super_admin') {
+            abort(403);
+        }
+
+        if ($request->user()->id === $user->id && $request->user()->role !== $validated['role']) {
+            return back()->with('error', 'You cannot change your own role.');
+        }
 
         $user->update($validated);
 
@@ -187,6 +252,8 @@ class UserController extends Controller
     // Ban / Unban user
     public function toggleBan(User $user)
     {
+        abort_unless(request()->user()->can('users.manage'), 403);
+
         $user->is_banned = ! $user->is_banned;
         $user->save();
 
@@ -196,6 +263,8 @@ class UserController extends Controller
     // Verify user manually
     public function verify(User $user)
     {
+        abort_unless(request()->user()->can('users.manage'), 403);
+
         $user->email_verified_at = now();
         $user->save();
 
@@ -205,6 +274,8 @@ class UserController extends Controller
     // Reset password (admin action)
     public function resetPassword(User $user)
     {
+        abort_unless(request()->user()->can('users.manage'), 403);
+
         $newPassword = 'password123';
 
         $user->password = Hash::make($newPassword);
@@ -215,8 +286,14 @@ class UserController extends Controller
 
     public function toggleRole(User $user)
     {
+        abort_unless(request()->user()->can('users.manage'), 403);
+
         if (auth()->id() === $user->id) {
             return back()->with('error', 'You cannot change your own role.');
+        }
+
+        if ($user->role === 'super_admin' || auth()->user()->role !== 'super_admin' && $user->role !== 'user') {
+            return back()->with('error', 'This role must be changed by a super admin from the edit screen.');
         }
 
         $user->role = $user->role === 'admin' ? 'user' : 'admin';
@@ -227,13 +304,15 @@ class UserController extends Controller
 
     public function destroy(User $user)
     {
+        abort_unless(request()->user()->can('users.manage'), 403);
+
         // optional safety: prevent deleting yourself
         if (auth()->id() === $user->id) {
             return back()->with('error', 'You cannot delete yourself.');
         }
 
-        if ($user->role === 'admin') {
-            return back()->with('error', 'You cannot delete an admin.');
+        if ($user->role === 'super_admin') {
+            return back()->with('error', 'You cannot delete a super admin.');
         }
 
         $user->delete();
@@ -245,6 +324,8 @@ class UserController extends Controller
 
     public function changeSubscription(Request $request, User $user)
     {
+        abort_unless($request->user()->can('subscriptions.manage'), 403);
+
         $validated = $request->validate([
             'price_id' => ['required', 'exists:subscription_prices,id'],
             'transition_type' => ['required', Rule::in(['manual_override', 'billing_now', 'billing_next_cycle'])],

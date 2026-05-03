@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -136,5 +137,45 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasOne(Subscription::class)
             ->whereIn('status', Subscription::CURRENT_STATUSES)
             ->latestOfMany('created_at');
+    }
+
+    public function roleDefinition(): BelongsTo
+    {
+        return $this->belongsTo(Role::class, 'role', 'slug');
+    }
+
+    public function hasRole(string $role): bool
+    {
+        return $this->role === $role;
+    }
+
+    public function hasPermission(string $permission): bool
+    {
+        if ($this->hasRole('super_admin')) {
+            return true;
+        }
+
+        $role = $this->relationLoaded('roleDefinition')
+            ? $this->roleDefinition
+            : $this->roleDefinition()->with('permissions')->first();
+
+        if ($role) {
+            return $role->permissions->contains('slug', $permission);
+        }
+
+        $configuredPermissions = config("rbac.roles.{$this->role}.permissions", []);
+
+        return in_array('*', $configuredPermissions, true) || in_array($permission, $configuredPermissions, true);
+    }
+
+    public function canAnyPermission(array $permissions): bool
+    {
+        foreach ($permissions as $permission) {
+            if ($this->hasPermission($permission)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

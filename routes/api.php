@@ -90,14 +90,14 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
 // Admin routes
 Route::prefix('v1/admin')->middleware(['auth:sanctum', 'admin'])->group(function () {
-    Route::get('/contributions/pending', [ProductContributionController::class, 'pending']);
-    Route::put('/contributions/{id}', [ProductContributionController::class, 'moderateUpdate']);
-    Route::post('/contributions/{id}/approve', [ProductContributionController::class, 'approve']);
-    Route::post('/contributions/{id}/reject', [ProductContributionController::class, 'reject']);
-    Route::post('/contributions/{id}/flag', [ProductContributionController::class, 'flag']);
+    Route::get('/contributions/pending', [ProductContributionController::class, 'pending'])->middleware('can:submissions.view');
+    Route::put('/contributions/{id}', [ProductContributionController::class, 'moderateUpdate'])->middleware('can:submissions.approve');
+    Route::post('/contributions/{id}/approve', [ProductContributionController::class, 'approve'])->middleware('can:submissions.approve');
+    Route::post('/contributions/{id}/reject', [ProductContributionController::class, 'reject'])->middleware('can:submissions.approve');
+    Route::post('/contributions/{id}/flag', [ProductContributionController::class, 'flag'])->middleware('can:submissions.approve');
 
     // Manual product management
-    Route::post('/products', [ProductController::class, 'store']);
-    Route::put('/products/{id}', [ProductController::class, 'update']);
-    Route::delete('/products/{id}', [ProductController::class, 'destroy']);
+    Route::post('/products', [ProductController::class, 'store'])->middleware('can:products.edit');
+    Route::put('/products/{id}', [ProductController::class, 'update'])->middleware('can:products.edit');
+    Route::delete('/products/{id}', [ProductController::class, 'destroy'])->middleware('can:products.edit');
 });

@@ -7,6 +7,7 @@ Start here:
 - [Scan Engine Documentation](docs/scanning-engine.md)
 - [Contribution And Moderation API Contract](docs/contribution-moderation-api.md)
 - [Leaderboard Documentation](docs/leaderboard.md)
+- [Roles And Permissions Documentation](docs/roles-and-permissions.md)
 
 What changed:
 
