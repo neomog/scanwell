@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\NotificationCampaign;
 use App\Models\Product;
 use App\Models\ProductContribution;
 use App\Models\User;
@@ -25,6 +26,8 @@ class DashboardController extends Controller
             ->whereDate('updated_at', Carbon::today())
             ->count();
         $totalUsers = User::count();
+        $notificationsSentToday = NotificationCampaign::whereDate('sent_at', Carbon::today())->count();
+        $scheduledNotifications = NotificationCampaign::where('status', NotificationCampaign::STATUS_SCHEDULED)->count();
 
         $contributionsChart = collect();
         $userGrowthChart = collect();
@@ -77,6 +80,21 @@ class DashboardController extends Controller
                 ]);
             });
 
+        NotificationCampaign::with('creator')
+            ->latest()
+            ->take(10)
+            ->get()
+            ->each(function (NotificationCampaign $campaign) use ($recentActivities) {
+                $recentActivities->push((object) [
+                    'message' => ($campaign->creator?->name ?? 'An admin') . ' published '
+                        . $campaign->type . ': '
+                        . $campaign->title,
+                    'time' => $campaign->created_at->diffForHumans(),
+                    'type' => 'notification',
+                    'timestamp' => $campaign->created_at->timestamp,
+                ]);
+            });
+
         $activityFeed = $recentActivities
             ->sortByDesc('timestamp')
             ->take(10)
@@ -107,6 +125,8 @@ class DashboardController extends Controller
             'pendingContributions',
             'approvedToday',
             'totalUsers',
+            'notificationsSentToday',
+            'scheduledNotifications',
             'contributionsChart',
             'userGrowthChart',
             'recentContributions',

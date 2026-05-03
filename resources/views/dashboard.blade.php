@@ -12,7 +12,7 @@
 
     <div class="py-6">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                 <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-[#1FA774] hover:shadow-md transition">
                     <div class="flex items-center justify-between">
                         <div>
@@ -68,6 +68,21 @@
                         <div class="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center">
                             <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-sky-500 hover:shadow-md transition">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500 mb-1">Notifications Sent</p>
+                            <p class="text-2xl font-bold text-sky-600">{{ $notificationsSentToday ?? 0 }}</p>
+                            <p class="text-xs text-gray-400 mt-2">{{ $scheduledNotifications ?? 0 }} scheduled</p>
+                        </div>
+                        <div class="w-12 h-12 bg-sky-50 rounded-xl flex items-center justify-center">
+                            <svg class="w-6 h-6 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 11-6 0m6 0H9"></path>
                             </svg>
                         </div>
                     </div>
@@ -188,6 +203,12 @@
                                         <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                                             <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                                            </svg>
+                                        </div>
+                                    @elseif(($activity->type ?? 'default') === 'notification')
+                                        <div class="w-8 h-8 bg-sky-100 rounded-full flex items-center justify-center">
+                                            <svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 11-6 0m6 0H9"></path>
                                             </svg>
                                         </div>
                                     @else
@@ -326,6 +347,22 @@
                     </div>
                     <p class="text-sm mt-2 opacity-90">Browse products -></p>
                 </a>
+
+                @can('notifications.view')
+                    <a href="{{ route('admin.notifications.index') }}"
+                       class="bg-gradient-to-r from-sky-500 to-cyan-600 rounded-xl shadow-sm p-6 text-white hover:shadow-md transition">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm opacity-90 mb-1">Notifications</p>
+                                <p class="text-2xl font-bold">{{ $notificationsSentToday ?? 0 }}</p>
+                            </div>
+                            <svg class="w-8 h-8 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 11-6 0m6 0H9"></path>
+                            </svg>
+                        </div>
+                        <p class="text-sm mt-2 opacity-90">Manage campaigns -></p>
+                    </a>
+                @endcan
             </div>
         </div>
     </div>

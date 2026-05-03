@@ -132,6 +132,21 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasMany(BillingRefund::class);
     }
 
+    public function notificationCampaigns(): HasMany
+    {
+        return $this->hasMany(NotificationCampaign::class, 'created_by');
+    }
+
+    public function notifications(): HasMany
+    {
+        return $this->hasMany(UserNotification::class);
+    }
+
+    public function pushTokens(): HasMany
+    {
+        return $this->hasMany(UserPushToken::class);
+    }
+
     public function currentSubscription(): HasOne
     {
         return $this->hasOne(Subscription::class)

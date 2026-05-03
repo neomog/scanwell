@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\BillingController as ApiBillingController;
+use App\Http\Controllers\Api\Admin\NotificationController as ApiAdminNotificationController;
+use App\Http\Controllers\Api\NotificationController as ApiNotificationController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ProductContributionController;
 use App\Http\Controllers\ProductController;
@@ -73,6 +75,14 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('/recommendations', [UserPreferenceController::class, 'recommendations'])
         ->middleware('plan.feature:recommendations.enabled');
 
+    Route::get('/notifications', [ApiNotificationController::class, 'index']);
+    Route::get('/notifications/unread-count', [ApiNotificationController::class, 'unreadCount']);
+    Route::get('/notifications/{notification}', [ApiNotificationController::class, 'show']);
+    Route::post('/notifications/{notification}/read', [ApiNotificationController::class, 'markRead']);
+    Route::post('/notifications/read-all', [ApiNotificationController::class, 'markAllRead']);
+    Route::post('/devices/push-tokens', [ApiNotificationController::class, 'registerPushToken']);
+    Route::delete('/devices/push-tokens', [ApiNotificationController::class, 'unregisterPushToken']);
+
     // Product contributions
     Route::post('/products/{barcode}/contribute', [ProductContributionController::class, 'store'])
         ->middleware('plan.feature:contributions.enabled');
@@ -100,4 +110,9 @@ Route::prefix('v1/admin')->middleware(['auth:sanctum', 'admin'])->group(function
     Route::post('/products', [ProductController::class, 'store'])->middleware('can:products.edit');
     Route::put('/products/{id}', [ProductController::class, 'update'])->middleware('can:products.edit');
     Route::delete('/products/{id}', [ProductController::class, 'destroy'])->middleware('can:products.edit');
+
+    Route::get('/notifications', [ApiAdminNotificationController::class, 'index'])->middleware('can:notifications.view');
+    Route::post('/notifications', [ApiAdminNotificationController::class, 'store'])->middleware('can:notifications.manage');
+    Route::get('/notifications/{notification}', [ApiAdminNotificationController::class, 'show'])->middleware('can:notifications.view');
+    Route::post('/notifications/{notification}/send', [ApiAdminNotificationController::class, 'send'])->middleware('can:notifications.manage');
 });

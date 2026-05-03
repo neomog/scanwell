@@ -16,6 +16,8 @@ return [
         ['slug' => 'complaints.view', 'name' => 'View Complaints', 'group' => 'support', 'description' => 'Access complaint workflows when enabled.'],
         ['slug' => 'bugs.view', 'name' => 'View Bugs', 'group' => 'support', 'description' => 'Access bug-report workflows when enabled.'],
         ['slug' => 'leaderboard.view', 'name' => 'View Leaderboard', 'group' => 'moderation', 'description' => 'Review contribution leaderboard data.'],
+        ['slug' => 'notifications.view', 'name' => 'View Notifications', 'group' => 'communications', 'description' => 'Review notification campaigns, announcements, and delivery results.'],
+        ['slug' => 'notifications.manage', 'name' => 'Manage Notifications', 'group' => 'communications', 'description' => 'Create, schedule, send, and resend notification campaigns.'],
         ['slug' => 'roles.manage', 'name' => 'Manage Roles', 'group' => 'security', 'description' => 'Create, edit, and assign permissions to roles.'],
         ['slug' => 'permissions.manage', 'name' => 'Manage Permissions', 'group' => 'security', 'description' => 'Create and maintain the permission catalog.'],
     ],
@@ -39,6 +41,8 @@ return [
                 'logs.view',
                 'complaints.view',
                 'leaderboard.view',
+                'notifications.view',
+                'notifications.manage',
             ],
         ],
         'moderator' => [
@@ -51,6 +55,7 @@ return [
                 'submissions.approve',
                 'logs.view',
                 'leaderboard.view',
+                'notifications.view',
             ],
         ],
         'support' => [
@@ -62,6 +67,7 @@ return [
                 'logs.view',
                 'complaints.view',
                 'bugs.view',
+                'notifications.view',
             ],
         ],
         'user' => [

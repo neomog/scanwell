@@ -190,6 +190,8 @@ The current seeded permission set is:
 - `complaints.view`
 - `bugs.view`
 - `leaderboard.view`
+- `notifications.view`
+- `notifications.manage`
 - `roles.manage`
 - `permissions.manage`
 
@@ -290,6 +292,8 @@ Examples:
 - `/admin/contributions` requires `submissions.view`
 - `/admin/contributions/{id}/approve` requires `submissions.approve`
 - `/admin/billing` requires `billing.view`
+- `/admin/notifications` requires `notifications.view`
+- `/admin/notifications/create` requires `notifications.manage`
 - `/admin/plans` requires `plans.manage`
 - `/admin/subscriptions` requires `subscriptions.manage`
 - `/admin/roles` requires `roles.manage`
@@ -306,6 +310,8 @@ Examples:
 - `GET /api/v1/admin/contributions/pending` requires `submissions.view`
 - `POST /api/v1/admin/contributions/{id}/approve` requires `submissions.approve`
 - `POST /api/v1/admin/products` requires `products.edit`
+- `GET /api/v1/admin/notifications` requires `notifications.view`
+- `POST /api/v1/admin/notifications` requires `notifications.manage`
 
 The API still enters through the admin middleware alias, then narrows per endpoint with permission checks.
 

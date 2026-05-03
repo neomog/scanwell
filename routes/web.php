@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\BillingController as AdminBillingController;
 use App\Http\Controllers\Admin\ContributionModerationController;
 use App\Http\Controllers\Admin\LeaderboardController;
+use App\Http\Controllers\Admin\NotificationController as AdminNotificationController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\ProductManagementController;
 use App\Http\Controllers\Admin\RoleController;
@@ -49,6 +50,11 @@ Route::middleware(['auth', AdminMiddleware::class])
         Route::post('/contributions/{contribution}/reject', [ContributionModerationController::class, 'reject'])->middleware('can:submissions.approve')->name('contributions.reject');
         Route::post('/contributions/{contribution}/flag', [ContributionModerationController::class, 'flag'])->middleware('can:submissions.approve')->name('contributions.flag');
         Route::get('/leaderboard', [LeaderboardController::class, 'index'])->middleware('can:leaderboard.view')->name('leaderboard.index');
+        Route::get('/notifications', [AdminNotificationController::class, 'index'])->middleware('can:notifications.view')->name('notifications.index');
+        Route::get('/notifications/create', [AdminNotificationController::class, 'create'])->middleware('can:notifications.manage')->name('notifications.create');
+        Route::post('/notifications', [AdminNotificationController::class, 'store'])->middleware('can:notifications.manage')->name('notifications.store');
+        Route::get('/notifications/{notification}', [AdminNotificationController::class, 'show'])->middleware('can:notifications.view')->name('notifications.show');
+        Route::post('/notifications/{notification}/send', [AdminNotificationController::class, 'send'])->middleware('can:notifications.manage')->name('notifications.send');
 
         Route::get('/plans', [SubscriptionPlanController::class, 'index'])->middleware('can:plans.manage')->name('plans.index');
         Route::get('/plans/create', [SubscriptionPlanController::class, 'create'])->middleware('can:plans.manage')->name('plans.create');
