@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\BillingController as AdminBillingController;
 use App\Http\Controllers\Admin\ContributionModerationController;
 use App\Http\Controllers\Admin\LeaderboardController;
 use App\Http\Controllers\Admin\NotificationController as AdminNotificationController;
+use App\Http\Controllers\Admin\SupportCaseController as AdminSupportCaseController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\ProductManagementController;
 use App\Http\Controllers\Admin\RoleController;
@@ -55,6 +56,10 @@ Route::middleware(['auth', AdminMiddleware::class])
         Route::post('/notifications', [AdminNotificationController::class, 'store'])->middleware('can:notifications.manage')->name('notifications.store');
         Route::get('/notifications/{notification}', [AdminNotificationController::class, 'show'])->middleware('can:notifications.view')->name('notifications.show');
         Route::post('/notifications/{notification}/send', [AdminNotificationController::class, 'send'])->middleware('can:notifications.manage')->name('notifications.send');
+        Route::get('/support', [AdminSupportCaseController::class, 'index'])->middleware('can:support.view')->name('support.index');
+        Route::get('/support/{supportCase}', [AdminSupportCaseController::class, 'show'])->middleware('can:support.view')->name('support.show');
+        Route::post('/support/{supportCase}', [AdminSupportCaseController::class, 'update'])->middleware('can:support.manage')->name('support.update');
+        Route::post('/support/{supportCase}/messages', [AdminSupportCaseController::class, 'message'])->middleware('can:support.manage')->name('support.message');
 
         Route::get('/plans', [SubscriptionPlanController::class, 'index'])->middleware('can:plans.manage')->name('plans.index');
         Route::get('/plans/create', [SubscriptionPlanController::class, 'create'])->middleware('can:plans.manage')->name('plans.create');

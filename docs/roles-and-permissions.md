@@ -188,7 +188,13 @@ The current seeded permission set is:
 - `billing.view`
 - `logs.view`
 - `complaints.view`
+- `complaints.manage`
 - `bugs.view`
+- `bugs.manage`
+- `support.view`
+- `support.manage`
+- `tickets.view`
+- `tickets.manage`
 - `leaderboard.view`
 - `notifications.view`
 - `notifications.manage`
@@ -292,6 +298,8 @@ Examples:
 - `/admin/contributions` requires `submissions.view`
 - `/admin/contributions/{id}/approve` requires `submissions.approve`
 - `/admin/billing` requires `billing.view`
+- `/admin/support` requires `support.view`
+- `/admin/support/{id}` requires `support.view`
 - `/admin/notifications` requires `notifications.view`
 - `/admin/notifications/create` requires `notifications.manage`
 - `/admin/plans` requires `plans.manage`
@@ -310,6 +318,8 @@ Examples:
 - `GET /api/v1/admin/contributions/pending` requires `submissions.view`
 - `POST /api/v1/admin/contributions/{id}/approve` requires `submissions.approve`
 - `POST /api/v1/admin/products` requires `products.edit`
+- `GET /api/v1/admin/support/cases` requires `support.view`
+- `POST /api/v1/admin/support/cases/{id}` requires `support.manage`
 - `GET /api/v1/admin/notifications` requires `notifications.view`
 - `POST /api/v1/admin/notifications` requires `notifications.manage`
 

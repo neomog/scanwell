@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\NotificationCampaign;
 use App\Models\Product;
 use App\Models\ProductContribution;
+use App\Models\SupportCase;
 use App\Models\User;
 use App\Services\ContributionReputationService;
 use App\Services\ProductContributionService;
@@ -28,6 +29,11 @@ class DashboardController extends Controller
         $totalUsers = User::count();
         $notificationsSentToday = NotificationCampaign::whereDate('sent_at', Carbon::today())->count();
         $scheduledNotifications = NotificationCampaign::where('status', NotificationCampaign::STATUS_SCHEDULED)->count();
+        $openSupportCases = SupportCase::whereIn('status', [
+            SupportCase::STATUS_OPEN,
+            SupportCase::STATUS_PENDING_SUPPORT,
+            SupportCase::STATUS_PENDING_USER,
+        ])->count();
 
         $contributionsChart = collect();
         $userGrowthChart = collect();
@@ -95,6 +101,21 @@ class DashboardController extends Controller
                 ]);
             });
 
+        SupportCase::with('user')
+            ->latest('last_message_at')
+            ->take(10)
+            ->get()
+            ->each(function (SupportCase $case) use ($recentActivities) {
+                $recentActivities->push((object) [
+                    'message' => ($case->user?->name ?? 'A user') . ' opened a '
+                        . str_replace('_', ' ', $case->type) . ' case: '
+                        . $case->subject,
+                    'time' => ($case->last_message_at ?? $case->created_at)->diffForHumans(),
+                    'type' => 'support',
+                    'timestamp' => ($case->last_message_at ?? $case->created_at)->timestamp,
+                ]);
+            });
+
         $activityFeed = $recentActivities
             ->sortByDesc('timestamp')
             ->take(10)
@@ -127,6 +148,7 @@ class DashboardController extends Controller
             'totalUsers',
             'notificationsSentToday',
             'scheduledNotifications',
+            'openSupportCases',
             'contributionsChart',
             'userGrowthChart',
             'recentContributions',

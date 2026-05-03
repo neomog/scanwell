@@ -31,6 +31,16 @@
             </a>
         @endcan
 
+        @can('support.view')
+            <a href="{{ route('admin.support.index') }}"
+               class="flex items-center gap-3 px-3 py-2 rounded-lg transition {{ request()->routeIs('admin.support.*') ? 'bg-gray-200 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100' }}">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5m-9 7h16a2 2 0 002-2V7a2 2 0 00-2-2h-3l-2-2H9L7 5H4a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                <span x-show="sidebarOpen">Support</span>
+            </a>
+        @endcan
+
         @can('products.view')
             <a href="{{ route('admin.products.index') }}"
                class="flex items-center gap-3 px-3 py-2 rounded-lg transition {{ request()->routeIs('admin.products.*') ? 'bg-gray-200 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100' }}">

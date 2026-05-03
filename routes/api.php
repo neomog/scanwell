@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\Api\BillingController as ApiBillingController;
 use App\Http\Controllers\Api\Admin\NotificationController as ApiAdminNotificationController;
+use App\Http\Controllers\Api\Admin\SupportCaseController as ApiAdminSupportCaseController;
 use App\Http\Controllers\Api\NotificationController as ApiNotificationController;
+use App\Http\Controllers\Api\SupportCaseController as ApiSupportCaseController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ProductContributionController;
 use App\Http\Controllers\ProductController;
@@ -83,6 +85,12 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('/devices/push-tokens', [ApiNotificationController::class, 'registerPushToken']);
     Route::delete('/devices/push-tokens', [ApiNotificationController::class, 'unregisterPushToken']);
 
+    Route::get('/support/cases', [ApiSupportCaseController::class, 'index']);
+    Route::post('/support/cases', [ApiSupportCaseController::class, 'store']);
+    Route::get('/support/cases/{supportCase}', [ApiSupportCaseController::class, 'show']);
+    Route::post('/support/cases/{supportCase}/messages', [ApiSupportCaseController::class, 'message']);
+    Route::post('/support/cases/{supportCase}/close', [ApiSupportCaseController::class, 'close']);
+
     // Product contributions
     Route::post('/products/{barcode}/contribute', [ProductContributionController::class, 'store'])
         ->middleware('plan.feature:contributions.enabled');
@@ -115,4 +123,9 @@ Route::prefix('v1/admin')->middleware(['auth:sanctum', 'admin'])->group(function
     Route::post('/notifications', [ApiAdminNotificationController::class, 'store'])->middleware('can:notifications.manage');
     Route::get('/notifications/{notification}', [ApiAdminNotificationController::class, 'show'])->middleware('can:notifications.view');
     Route::post('/notifications/{notification}/send', [ApiAdminNotificationController::class, 'send'])->middleware('can:notifications.manage');
+
+    Route::get('/support/cases', [ApiAdminSupportCaseController::class, 'index'])->middleware('can:support.view');
+    Route::get('/support/cases/{supportCase}', [ApiAdminSupportCaseController::class, 'show'])->middleware('can:support.view');
+    Route::post('/support/cases/{supportCase}', [ApiAdminSupportCaseController::class, 'update'])->middleware('can:support.manage');
+    Route::post('/support/cases/{supportCase}/messages', [ApiAdminSupportCaseController::class, 'message'])->middleware('can:support.manage');
 });
