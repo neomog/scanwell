@@ -41,11 +41,72 @@ Use one of:
 - `bug_report`
 - `chat_support`
 
+## Case Statuses
+
+Cases returned by the API can be in one of these states:
+
+- `open`
+- `pending_support`
+- `pending_user`
+- `resolved`
+- `closed`
+
+Status behavior:
+
+- newly created cases start as `pending_support`
+- customer replies move the case to `pending_support`
+- support replies move the case to `pending_user`
+- closed cases cannot receive new customer messages
+
+## Create Case Payload
+
+Required fields:
+
+- `type`
+- `subject`
+- `description`
+
+Optional fields:
+
+- `priority`
+- `attachments`
+- `metadata`
+
+Allowed `priority` values:
+
+- `low`
+- `normal`
+- `high`
+- `urgent`
+
+Supported `metadata` keys:
+
+- `platform`
+- `app_version`
+- `os_version`
+- `device_name`
+- `screen`
+
 ## 1. List My Support Cases
 
 ```bash
 curl --request GET \
   --url https://scanwell.ohiare.com/api/v1/support/cases \
+  --header "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  --header "Accept: application/json"
+```
+
+Optional query params:
+
+- `type`
+- `status`
+- `per_page`
+
+Example with filters:
+
+```bash
+curl --request GET \
+  --url "https://scanwell.ohiare.com/api/v1/support/cases?type=bug_report&status=pending_support&per_page=10" \
   --header "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   --header "Accept: application/json"
 ```
@@ -245,6 +306,22 @@ curl --request POST \
   }'
 ```
 
+Reply with attachments example:
+
+```bash
+curl --request POST \
+  --url https://scanwell.ohiare.com/api/v1/support/cases/09e18c46-d3b5-45ba-86fb-95ce86a20fa4/messages \
+  --header "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  --header "Accept: application/json" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "message": "Here is an updated screen recording of the issue.",
+    "attachments": [
+      "https://example.com/crash-video.mp4"
+    ]
+  }'
+```
+
 Sample response:
 
 ```json
@@ -347,3 +424,28 @@ Sample response:
   }
 }
 ```
+
+## Closed Case Reply Error Example
+
+If the customer tries to reply to a resolved or closed case, the API returns `422 Unprocessable Entity`.
+
+Sample response:
+
+```json
+{
+  "success": false,
+  "message": "Resolved or closed support cases cannot receive new customer messages.",
+  "data": null,
+  "errors": null
+}
+```
+
+## Quick Mobile Flow
+
+Typical mobile app flow:
+
+1. Create a case with `POST /api/v1/support/cases`.
+2. Show the customer ticket list with `GET /api/v1/support/cases`.
+3. Open a thread with `GET /api/v1/support/cases/{supportCase}`.
+4. Send follow-up messages with `POST /api/v1/support/cases/{supportCase}/messages`.
+5. Let the customer close the thread with `POST /api/v1/support/cases/{supportCase}/close`.
