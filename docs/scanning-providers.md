@@ -1,0 +1,151 @@
+# Scanning Providers
+
+This document complements the multi-provider scan engine and the super-admin provider dashboard.
+
+## Current provider lineup
+
+- `open_facts`
+  - Driver: `App\Services\OpenFoodFactsService`
+  - Type: free
+  - Covers: `food`, `cosmetic`, `pet_food`, `household`, `general`
+
+- `upcitemdb`
+  - Driver: `App\Services\UpcItemDbService`
+  - Type: free trial or paid
+  - Covers: `food`, `cosmetic`, `pet_food`, `household`, `general`
+
+- `barcode_lookup`
+  - Driver: `App\Services\BarcodeLookupService`
+  - Type: paid
+  - Covers: `food`, `cosmetic`, `pet_food`, `household`, `general`
+
+- `edamam`
+  - Driver: `App\Services\EdamamFoodDatabaseService`
+  - Type: paid
+  - Covers: `food`
+
+- `gs1_us`
+  - Driver: `App\Services\Gs1UsProductService`
+  - Type: enterprise paid
+  - Covers: `food`, `cosmetic`, `pet_food`, `household`, `general`
+
+## Admin workflow
+
+Open `/admin/scanning/providers` as a super admin.
+
+For each provider you can:
+
+- enable or disable it
+- move it up or down using `priority`
+- restrict product families
+- tune `timeout`, `retries`, and `cache_ttl_minutes`
+- add runtime `settings` JSON
+- add encrypted `credentials` JSON
+
+## Credentials JSON examples
+
+### UPCitemdb
+
+Free trial mode can run without credentials. Paid mode requires a `user_key`.
+
+```json
+{
+  "user_key": "your_upcitemdb_user_key"
+}
+```
+
+### Barcode Lookup
+
+```json
+{
+  "api_key": "your_barcode_lookup_api_key"
+}
+```
+
+### Edamam
+
+```json
+{
+  "app_id": "your_edamam_app_id",
+  "app_key": "your_edamam_app_key"
+}
+```
+
+### GS1 US
+
+```json
+{
+  "api_key": "your_gs1_api_key",
+  "account_id": "optional_account_id"
+}
+```
+
+## Settings JSON examples
+
+### UPCitemdb
+
+```json
+{
+  "mode": "trial",
+  "base_url": "https://api.upcitemdb.com/prod/trial/lookup",
+  "key_type": "3scale"
+}
+```
+
+For paid mode:
+
+```json
+{
+  "mode": "prod",
+  "base_url": "https://api.upcitemdb.com/prod/v1/lookup",
+  "key_type": "3scale"
+}
+```
+
+### Barcode Lookup
+
+```json
+{
+  "base_url": "https://api.barcodelookup.com/v3/products"
+}
+```
+
+### Edamam
+
+```json
+{
+  "base_url": "https://api.edamam.com/api/food-database/v2/parser",
+  "category": "packaged-foods",
+  "nutrition_type": "cooking"
+}
+```
+
+### GS1 US
+
+The GS1 US driver is intentionally endpoint-configurable because the exact request URL depends on the subscribed API operation in the GS1 US Developer Portal.
+
+```json
+{
+  "base_url": "https://your-gs1-endpoint-from-developer-portal",
+  "http_method": "GET",
+  "barcode_field": "gtin",
+  "barcode_path": "gtin"
+}
+```
+
+## Recommended priority
+
+Suggested production order:
+
+1. `gs1_us`
+2. `open_facts`
+3. `edamam`
+4. `upcitemdb`
+5. `barcode_lookup`
+
+That order gives you:
+
+- trusted identity verification first
+- free high-signal food and cosmetic enrichment second
+- paid food enrichment third
+- broad commercial metadata fallback after that
