@@ -38,6 +38,43 @@ class SupportCaseService
         return $case->fresh(['user', 'assignee']);
     }
 
+    public function createForSupport(User $actor, User $customer, array $payload): SupportCase
+    {
+        $now = now();
+
+        $case = SupportCase::create([
+            'reference' => $this->generateReference(),
+            'user_id' => $customer->id,
+            'assigned_to' => $payload['assigned_to'] ?? null,
+            'type' => $payload['type'],
+            'subject' => $payload['subject'],
+            'description' => $payload['description'],
+            'status' => $payload['status'] ?? SupportCase::STATUS_OPEN,
+            'priority' => $payload['priority'] ?? 'normal',
+            'source' => $payload['source'] ?? 'admin',
+            'attachments' => $payload['attachments'] ?? [],
+            'metadata' => $payload['metadata'] ?? [],
+            'support_last_read_at' => $now,
+            'last_message_at' => $now,
+        ]);
+
+        $this->addMessage($case, $actor, [
+            'message' => $payload['description'],
+            'attachments' => $payload['attachments'] ?? [],
+            'is_internal' => false,
+        ], 'support');
+
+        if (($payload['status'] ?? null) && $payload['status'] !== $case->status) {
+            $case = $this->updateCase($case, [
+                'status' => $payload['status'],
+                'priority' => $payload['priority'] ?? $case->priority,
+                'assigned_to' => $payload['assigned_to'] ?? $case->assigned_to,
+            ]);
+        }
+
+        return $case->fresh(['user', 'assignee']);
+    }
+
     public function addMessage(SupportCase $case, ?User $actor, array $payload, string $senderType): SupportMessage
     {
         $message = $case->messages()->create([

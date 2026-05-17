@@ -100,4 +100,35 @@ class SupportModuleTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.case.status', 'pending_user');
     }
+
+    public function test_support_agent_can_create_and_assign_support_case_from_dashboard(): void
+    {
+        $customer = User::factory()->create();
+        $support = User::factory()->support()->create();
+
+        $this->actingAs($support)
+            ->get(route('admin.support.create'))
+            ->assertOk();
+
+        $this->actingAs($support)
+            ->post(route('admin.support.store'), [
+                'user_id' => $customer->id,
+                'assigned_to' => $support->id,
+                'type' => SupportCase::TYPE_TICKET,
+                'subject' => 'Manual follow-up ticket',
+                'description' => 'We opened this ticket after a phone conversation.',
+                'status' => SupportCase::STATUS_OPEN,
+                'priority' => 'high',
+            ])
+            ->assertRedirect();
+
+        $case = SupportCase::query()->where('subject', 'Manual follow-up ticket')->first();
+
+        $this->assertNotNull($case);
+        $this->assertSame($customer->id, $case->user_id);
+        $this->assertSame($support->id, $case->assigned_to);
+        $this->assertSame(SupportCase::STATUS_OPEN, $case->status);
+        $this->assertSame('admin', $case->source);
+        $this->assertTrue($case->messages()->exists());
+    }
 }

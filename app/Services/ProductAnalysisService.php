@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Product;
+use App\Models\Scan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Exception;
@@ -19,17 +20,17 @@ class ProductAnalysisService
     /**
      * Analyze product by barcode.
      */
-    public function analyzeByBarcode(string $barcode, ?string $userId = null): Product
+    public function analyzeByBarcode(string $barcode, ?string $userId = null, ?Scan $scan = null): Product
     {
-        return DB::transaction(function () use ($barcode) {
+        return DB::transaction(function () use ($barcode, $scan) {
             $product = $this->productWorkflowService->findByBarcode($barcode);
 
             if ($product) {
                 if ($this->shouldRefreshProduct($product)) {
-                    $this->updateProductFromApi($product);
+                    $this->updateProductFromApi($product, $scan);
                 }
             } else {
-                $product = $this->createProductFromApi($barcode);
+                $product = $this->createProductFromApi($barcode, $scan);
             }
 
             return $product->load(['ingredients', 'nutrition', 'foodScore', 'cosmeticScore']);
@@ -39,9 +40,9 @@ class ProductAnalysisService
     /**
      * Create new product from external catalog data.
      */
-    public function createProductFromApi(string $barcode): Product
+    public function createProductFromApi(string $barcode, ?Scan $scan = null): Product
     {
-        $catalogData = $this->productCatalogService->findByBarcode($barcode);
+        $catalogData = $this->productCatalogService->findByBarcode($barcode, null, $scan);
 
         if (!$catalogData) {
             throw new Exception("Product not found with barcode: {$barcode}", 404);
@@ -77,10 +78,14 @@ class ProductAnalysisService
     /**
      * Update existing product with fresh vendor data.
      */
-    protected function updateProductFromApi(Product $product): void
+    protected function updateProductFromApi(Product $product, ?Scan $scan = null): void
     {
         try {
-            $catalogData = $this->productCatalogService->findByBarcode($product->barcode);
+            $catalogData = $this->productCatalogService->findByBarcode(
+                $product->barcode,
+                $product->resolved_product_family,
+                $scan
+            );
 
             if (!$catalogData) {
                 return;
@@ -126,12 +131,7 @@ class ProductAnalysisService
             return false;
         }
 
-        $externalSources = array_map(
-            fn (array $source): string => $source['key'],
-            config('scanning.open_food_facts.sources', [])
-        );
-
-        if (!in_array($product->source, $externalSources, true)) {
+        if (!filled(data_get($product->raw_data, '_scanwell.provider'))) {
             return false;
         }
 
@@ -150,6 +150,7 @@ class ProductAnalysisService
             'matched_by' => 'barcode_exact',
             'packaging' => $catalogData['packaging'] ?? [],
             'warnings' => $catalogData['warnings'] ?? [],
+            'lookup_summary' => $catalogData['lookup_summary'] ?? $this->productCatalogService->lastLookupSummary(),
             'resolved_at' => now()->toIso8601String(),
         ];
 
@@ -165,5 +166,10 @@ class ProductAnalysisService
         }
 
         return false;
+    }
+
+    public function lastLookupSummary(): array
+    {
+        return $this->productCatalogService->lastLookupSummary();
     }
 }

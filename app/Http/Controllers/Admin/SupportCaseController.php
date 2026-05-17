@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\AdminSupportCaseCreateRequest;
 use App\Http\Requests\AdminSupportCaseUpdateRequest;
 use App\Http\Requests\SupportMessageRequest;
 use App\Models\SupportCase;
@@ -70,6 +71,39 @@ class SupportCaseController extends Controller
                 'unassigned' => SupportCase::whereNull('assigned_to')->count(),
             ],
         ]);
+    }
+
+    public function create(Request $request): View
+    {
+        abort_unless($request->user()->can('support.manage'), 403);
+
+        return view('admin.support.create', [
+            'types' => config('support.types', []),
+            'statuses' => config('support.statuses', []),
+            'priorities' => config('support.priorities', []),
+            'customers' => User::query()->orderBy('name')->get(['id', 'name', 'email']),
+            'agents' => User::query()
+                ->whereIn('role', ['super_admin', 'admin', 'support'])
+                ->orderBy('name')
+                ->get(['id', 'name', 'email', 'role']),
+        ]);
+    }
+
+    public function store(AdminSupportCaseCreateRequest $request): RedirectResponse
+    {
+        abort_unless($request->user()->can('support.manage'), 403);
+
+        $customer = User::query()->findOrFail($request->validated('user_id'));
+
+        $supportCase = $this->supportCaseService->createForSupport(
+            $request->user(),
+            $customer,
+            $request->validated()
+        );
+
+        return redirect()
+            ->route('admin.support.show', $supportCase)
+            ->with('success', 'Support case created successfully.');
     }
 
     public function show(Request $request, SupportCase $supportCase): View

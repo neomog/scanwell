@@ -89,6 +89,16 @@
             </a>
         @endcan
 
+        @can('scanning.manage')
+            <a href="{{ route('admin.scanning.providers.index') }}"
+               class="flex items-center gap-3 px-3 py-2 rounded-lg transition {{ request()->routeIs('admin.scanning.*') ? 'bg-gray-200 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100' }}">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 3v2.25M14.25 3v2.25M4.5 9.75h15M6.75 6h10.5A2.25 2.25 0 0119.5 8.25v9A2.25 2.25 0 0117.25 19.5H6.75A2.25 2.25 0 014.5 17.25v-9A2.25 2.25 0 016.75 6zm1.5 7.5h7.5m-7.5 3h4.5"/>
+                </svg>
+                <span x-show="sidebarOpen">Scanning</span>
+            </a>
+        @endcan
+
         @can('plans.manage')
             <a href="{{ route('admin.plans.index') }}"
                class="flex items-center gap-3 px-3 py-2 rounded-lg transition {{ request()->routeIs('admin.plans.*') || request()->routeIs('admin.prices.*') ? 'bg-gray-200 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100' }}">

@@ -56,4 +56,18 @@ class RbacAccessTest extends TestCase
             ->get('/admin/permissions')
             ->assertOk();
     }
+
+    public function test_scanning_provider_management_is_restricted_to_super_admin(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($superAdmin)
+            ->get('/admin/scanning/providers')
+            ->assertOk();
+
+        $this->actingAs($admin)
+            ->get('/admin/scanning/providers')
+            ->assertForbidden();
+    }
 }

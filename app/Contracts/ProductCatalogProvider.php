@@ -6,5 +6,5 @@ interface ProductCatalogProvider
 {
     public function providerKey(): string;
 
-    public function findByBarcode(string $barcode): ?array;
+    public function findByBarcode(string $barcode, array $settings = [], array $credentials = []): ?array;
 }

@@ -24,6 +24,7 @@ return [
         ['slug' => 'leaderboard.view', 'name' => 'View Leaderboard', 'group' => 'moderation', 'description' => 'Review contribution leaderboard data.'],
         ['slug' => 'notifications.view', 'name' => 'View Notifications', 'group' => 'communications', 'description' => 'Review notification campaigns, announcements, and delivery results.'],
         ['slug' => 'notifications.manage', 'name' => 'Manage Notifications', 'group' => 'communications', 'description' => 'Create, schedule, send, and resend notification campaigns.'],
+        ['slug' => 'scanning.manage', 'name' => 'Manage Scanning Providers', 'group' => 'operations', 'description' => 'Configure scan providers, provider priority, and provider runtime settings.'],
         ['slug' => 'roles.manage', 'name' => 'Manage Roles', 'group' => 'security', 'description' => 'Create, edit, and assign permissions to roles.'],
         ['slug' => 'permissions.manage', 'name' => 'Manage Permissions', 'group' => 'security', 'description' => 'Create and maintain the permission catalog.'],
     ],

@@ -11,16 +11,10 @@ use Illuminate\Support\Facades\Log;
 
 class OpenFoodFactsService implements ProductCatalogProvider
 {
-    protected array $sources;
-    protected int $timeout;
-    protected int $retryAttempts;
     protected bool $verifySsl;
 
     public function __construct()
     {
-        $this->sources = config('scanning.open_food_facts.sources', []);
-        $this->timeout = config('scanning.open_food_facts.timeout', 10);
-        $this->retryAttempts = config('scanning.open_food_facts.retry_attempts', 3);
         $this->verifySsl = App::environment('production');
     }
 
@@ -29,15 +23,16 @@ class OpenFoodFactsService implements ProductCatalogProvider
         return 'open_facts';
     }
 
-    public function findByBarcode(string $barcode): ?array
+    public function findByBarcode(string $barcode, array $settings = [], array $credentials = []): ?array
     {
+        $resolvedSettings = $this->resolveSettings($settings);
         $cacheKey = "scanwell:open_facts:product:{$barcode}";
 
-        return Cache::remember($cacheKey, now()->addDays(7), function () use ($barcode) {
+        return Cache::remember($cacheKey, now()->addMinutes($resolvedSettings['cache_ttl_minutes']), function () use ($barcode, $resolvedSettings) {
             $candidates = [];
 
-            foreach ($this->sources as $source) {
-                $candidate = $this->fetchFromSource($source, $barcode);
+            foreach ($resolvedSettings['sources'] as $source) {
+                $candidate = $this->fetchFromSource($source, $barcode, $resolvedSettings);
 
                 if ($candidate !== null) {
                     $candidates[] = $candidate;
@@ -60,14 +55,15 @@ class OpenFoodFactsService implements ProductCatalogProvider
 
     public function searchProducts(string $query, int $page = 1, int $pageSize = 20): array
     {
-        $primarySource = $this->sources[0] ?? null;
+        $settings = $this->resolveSettings();
+        $primarySource = $settings['sources'][0] ?? null;
 
         if ($primarySource === null) {
             return ['products' => [], 'total' => 0, 'page' => $page, 'page_count' => 0];
         }
 
         try {
-            $response = $this->createHttpClient()->get("{$primarySource['base_url']}/search", [
+            $response = $this->createHttpClient($settings)->get("{$primarySource['base_url']}/search", [
                 'search_terms' => $query,
                 'page' => $page,
                 'page_size' => $pageSize,
@@ -99,10 +95,10 @@ class OpenFoodFactsService implements ProductCatalogProvider
         }
     }
 
-    protected function fetchFromSource(array $source, string $barcode): ?array
+    protected function fetchFromSource(array $source, string $barcode, array $settings): ?array
     {
         try {
-            $response = $this->createHttpClient()->get("{$source['base_url']}/product/{$barcode}.json");
+            $response = $this->createHttpClient($settings)->get("{$source['base_url']}/product/{$barcode}.json");
 
             if (!$response->successful()) {
                 return null;
@@ -161,9 +157,9 @@ class OpenFoodFactsService implements ProductCatalogProvider
         ];
     }
 
-    protected function createHttpClient(): PendingRequest
+    protected function createHttpClient(array $settings): PendingRequest
     {
-        $httpClient = Http::timeout($this->timeout)->retry($this->retryAttempts, 100);
+        $httpClient = Http::timeout($settings['timeout'])->retry($settings['retry_attempts'], 100);
 
         return $this->verifySsl ? $httpClient : $httpClient->withoutVerifying();
     }
@@ -358,5 +354,15 @@ class OpenFoodFactsService implements ProductCatalogProvider
 
             return null;
         }, $value)));
+    }
+
+    protected function resolveSettings(array $settings = []): array
+    {
+        return [
+            'sources' => $settings['sources'] ?? config('scanning.open_food_facts.sources', []),
+            'timeout' => (int) ($settings['timeout'] ?? config('scanning.open_food_facts.timeout', 10)),
+            'retry_attempts' => (int) ($settings['retry_attempts'] ?? config('scanning.open_food_facts.retry_attempts', 3)),
+            'cache_ttl_minutes' => (int) ($settings['cache_ttl_minutes'] ?? 60 * 24 * 7),
+        ];
     }
 }

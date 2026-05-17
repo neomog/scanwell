@@ -51,13 +51,16 @@ class ScanController extends Controller
             ]);
 
             $product = $this->analysisService
-                ->analyzeByBarcode($barcode, Auth::id())
+                ->analyzeByBarcode($barcode, Auth::id(), $scan)
                 ->load(['ingredients', 'nutrition', 'foodScore', 'cosmeticScore', 'images', 'barcodes']);
+
+            $lookupSummary = $this->analysisService->lastLookupSummary();
 
             $scan->markAsCompleted($product, [
                 'matched_provider' => data_get($product->raw_data, '_scanwell.source'),
                 'product_family' => $product->resolved_product_family,
                 'confidence' => data_get($product->raw_data, '_scanwell.confidence'),
+                'provider_lookup' => $lookupSummary,
             ]);
 
             $personalizedWarnings = [];
@@ -97,7 +100,9 @@ class ScanController extends Controller
             ], 403);
         } catch (Exception|Error $e) {
             if (isset($scan)) {
-                $scan->markAsFailed($e->getMessage());
+                $scan->markAsFailed($e->getMessage(), [
+                    'provider_lookup' => $this->analysisService->lastLookupSummary(),
+                ]);
             }
 
             if ((int) $e->getCode() === 404) {

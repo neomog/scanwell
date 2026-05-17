@@ -5,6 +5,11 @@
                 <h2 class="font-semibold text-xl text-gray-800">Support Center</h2>
                 <p class="text-sm text-gray-500 mt-1">Manage complaints, tickets, chat support conversations, and bug reports.</p>
             </div>
+            @can('support.manage')
+                <a href="{{ route('admin.support.create') }}" class="px-4 py-2 rounded-lg bg-[#1FA774] text-white hover:bg-[#0D8B5E] transition">
+                    New Case
+                </a>
+            @endcan
         </div>
     </x-slot>
 

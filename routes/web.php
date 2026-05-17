@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\SupportCaseController as AdminSupportCaseControll
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\ProductManagementController;
 use App\Http\Controllers\Admin\RoleController;
+use App\Http\Controllers\Admin\ScanProviderController;
 use App\Http\Controllers\Admin\SubscriptionController;
 use App\Http\Controllers\Admin\SubscriptionPlanController;
 use App\Http\Controllers\Admin\UserController;
@@ -56,7 +57,12 @@ Route::middleware(['auth', AdminMiddleware::class])
         Route::post('/notifications', [AdminNotificationController::class, 'store'])->middleware('can:notifications.manage')->name('notifications.store');
         Route::get('/notifications/{notification}', [AdminNotificationController::class, 'show'])->middleware('can:notifications.view')->name('notifications.show');
         Route::post('/notifications/{notification}/send', [AdminNotificationController::class, 'send'])->middleware('can:notifications.manage')->name('notifications.send');
+        Route::get('/scanning/providers', [ScanProviderController::class, 'index'])->middleware('can:scanning.manage')->name('scanning.providers.index');
+        Route::post('/scanning/providers/{scanProvider}', [ScanProviderController::class, 'update'])->middleware('can:scanning.manage')->name('scanning.providers.update');
+        Route::post('/scanning/providers/{scanProvider}/toggle-active', [ScanProviderController::class, 'toggleActive'])->middleware('can:scanning.manage')->name('scanning.providers.toggle-active');
         Route::get('/support', [AdminSupportCaseController::class, 'index'])->middleware('can:support.view')->name('support.index');
+        Route::get('/support/create', [AdminSupportCaseController::class, 'create'])->middleware('can:support.manage')->name('support.create');
+        Route::post('/support', [AdminSupportCaseController::class, 'store'])->middleware('can:support.manage')->name('support.store');
         Route::get('/support/{supportCase}', [AdminSupportCaseController::class, 'show'])->middleware('can:support.view')->name('support.show');
         Route::post('/support/{supportCase}', [AdminSupportCaseController::class, 'update'])->middleware('can:support.manage')->name('support.update');
         Route::post('/support/{supportCase}/messages', [AdminSupportCaseController::class, 'message'])->middleware('can:support.manage')->name('support.message');
