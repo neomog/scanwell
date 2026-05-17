@@ -41,6 +41,7 @@ For each provider you can:
 - tune `timeout`, `retries`, and `cache_ttl_minutes`
 - add runtime `settings` JSON
 - add encrypted `credentials` JSON
+- run a provider-specific `Sync Products` action when the driver supports imports
 
 ## Credentials JSON examples
 
@@ -61,6 +62,31 @@ Free trial mode can run without credentials. Paid mode requires a `user_key`.
   "api_key": "your_barcode_lookup_api_key"
 }
 ```
+
+## One-click provider imports
+
+The admin dashboard can show a `Sync Products` button per provider.
+
+Right now, that button is available only for providers whose driver supports catalog search imports. The first implementation is intended for `open_facts`.
+
+Add this block to the provider `settings` JSON:
+
+```json
+{
+  "import": {
+    "query": "snacks",
+    "page_size": 20,
+    "max_pages": 2
+  }
+}
+```
+
+Notes:
+
+- `query` is required
+- `page_size` defaults to `20`
+- `max_pages` defaults to `1`
+- the import runs in the queue, so make sure a worker is running
 
 ### Edamam
 

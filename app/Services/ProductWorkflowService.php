@@ -12,6 +12,7 @@ use App\Models\ProductBarcode;
 use App\Models\ProductContribution;
 use App\Models\ProductImage;
 use App\Models\User;
+use InvalidArgumentException;
 
 class ProductWorkflowService
 {
@@ -33,6 +34,7 @@ class ProductWorkflowService
     public function createProduct(array $payload, array $context = []): Product
     {
         $normalized = $this->normalizePayload($payload);
+        $this->assertRequiredProductFields($normalized);
         $actor = $context['actor'] ?? null;
         $manualOverrides = ($context['track_manual_overrides'] ?? false)
             ? $this->buildManualOverrides([], $normalized)
@@ -306,11 +308,24 @@ class ProductWorkflowService
     {
         $payload = $this->productPayloadService->fromInput($payload);
 
-        if (!array_key_exists('name', $payload) && $existing) {
+        $resolvedName = $this->resolvePayloadString($payload, [
+            'name',
+            'product_name',
+            'generic_name',
+            'abbreviated_product_name',
+        ], $payload['raw_data'] ?? []);
+
+        if ($resolvedName !== null) {
+            $payload['name'] = $resolvedName;
+        } elseif ($existing?->name) {
             $payload['name'] = $existing->name;
         }
 
-        if (!array_key_exists('barcode', $payload) && $existing) {
+        $resolvedBarcode = $this->resolvePayloadString($payload, ['barcode', 'code'], $payload['raw_data'] ?? []);
+
+        if ($resolvedBarcode !== null) {
+            $payload['barcode'] = $resolvedBarcode;
+        } elseif ($existing?->barcode) {
             $payload['barcode'] = $existing->barcode;
         }
 
@@ -350,6 +365,35 @@ class ProductWorkflowService
         }
 
         return $payload;
+    }
+
+    protected function assertRequiredProductFields(array $payload): void
+    {
+        $missingFields = [];
+
+        foreach (['barcode', 'name'] as $field) {
+            if (trim((string) ($payload[$field] ?? '')) === '') {
+                $missingFields[] = $field;
+            }
+        }
+
+        if ($missingFields !== []) {
+            throw new InvalidArgumentException('Product payload missing required fields: '.implode(', ', $missingFields));
+        }
+    }
+
+    protected function resolvePayloadString(array $payload, array $keys, array $rawData = []): ?string
+    {
+        foreach ($keys as $key) {
+            $value = $payload[$key] ?? data_get($rawData, $key);
+            $resolved = trim((string) $value);
+
+            if ($resolved !== '') {
+                return $resolved;
+            }
+        }
+
+        return null;
     }
 
     protected function syncIngredients(Product $product, array $ingredients): void

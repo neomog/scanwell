@@ -2,10 +2,11 @@
 
 namespace Tests\Fixtures;
 
+use App\Contracts\ProductCatalogImportProvider;
 use App\Contracts\ProductCatalogProvider;
 use RuntimeException;
 
-class FakeCatalogProvider implements ProductCatalogProvider
+class FakeCatalogProvider implements ProductCatalogImportProvider, ProductCatalogProvider
 {
     public function providerKey(): string
     {
@@ -51,6 +52,37 @@ class FakeCatalogProvider implements ProductCatalogProvider
                 'categories' => 'Beverages',
                 'categories_tags' => ['en:beverages'],
             ],
+        ];
+    }
+
+    public function searchProducts(string $query, int $page = 1, int $pageSize = 20, array $settings = [], array $credentials = []): array
+    {
+        if (($settings['import_mode'] ?? 'results') === 'empty') {
+            return [
+                'products' => [],
+                'total' => 0,
+                'page' => $page,
+                'page_count' => 0,
+            ];
+        }
+
+        $products = collect($settings['import_products'] ?? [[
+            'barcode' => $settings['import_barcode'] ?? '1122334455',
+            'name' => $settings['import_name'] ?? 'Imported Product',
+            'brand' => $settings['import_brand'] ?? 'Imported Brand',
+            'source' => $settings['source'] ?? 'fake_import_source',
+            'product_type' => $settings['product_type'] ?? 'food',
+            'image_url' => $settings['image_url'] ?? 'https://example.com/imported-product.jpg',
+            'ingredients' => $settings['ingredients'] ?? [['name' => 'Water']],
+            'nutrition' => $settings['nutrition'] ?? ['calories' => 10],
+            'raw_data' => $settings['raw_data'] ?? ['categories' => 'Imported'],
+        ]]);
+
+        return [
+            'products' => $products->forPage($page, $pageSize)->values()->all(),
+            'total' => $products->count(),
+            'page' => $page,
+            'page_count' => (int) ceil($products->count() / max($pageSize, 1)),
         ];
     }
 }

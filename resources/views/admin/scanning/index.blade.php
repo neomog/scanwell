@@ -42,8 +42,56 @@
                             </div>
                         </div>
 
+                        <div class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-sm">
+                            <div class="flex items-center justify-between gap-3">
+                                <div>
+                                    <div class="font-medium text-slate-800">Product Sync</div>
+                                    @if($provider->supports_import)
+                                        <div class="mt-1 text-slate-600">
+                                            @if($provider->import_config_summary)
+                                                Query: <span class="font-medium text-slate-800">{{ $provider->import_config_summary['query'] }}</span>
+                                            @else
+                                                Configure <span class="font-mono text-xs">settings.import.query</span> below to enable one-click imports.
+                                            @endif
+                                        </div>
+                                    @else
+                                        <div class="mt-1 text-slate-500">This provider currently supports barcode lookup only.</div>
+                                    @endif
+                                </div>
+                                @if($provider->supports_import)
+                                    <form method="POST" action="{{ route('admin.scanning.providers.sync-products', $provider) }}">
+                                        @csrf
+                                        <button
+                                            type="submit"
+                                            class="px-4 py-2 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                            @disabled(!$provider->import_config_summary)
+                                        >
+                                            Sync Products
+                                        </button>
+                                    </form>
+                                @endif
+                            </div>
+                            @if($provider->supports_import && $provider->import_config_summary)
+                                <div class="mt-2 text-xs text-slate-500">
+                                    Runs {{ $provider->import_config_summary['max_pages'] }} page(s) at up to {{ $provider->import_config_summary['page_size'] }} products per page.
+                                </div>
+                            @endif
+                        </div>
+
                         <form method="POST" action="{{ route('admin.scanning.providers.update', $provider) }}" class="space-y-4">
                             @csrf
+                            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                <div class="flex items-center justify-between gap-3">
+                                    <div>
+                                        <div class="text-sm font-semibold text-slate-900">Provider Configuration</div>
+                                        <div class="text-xs text-slate-500">Make changes and save this provider.</div>
+                                    </div>
+                                    <button type="submit" class="shrink-0 px-4 py-2 rounded-lg border border-slate-300 bg-white text-black hover:bg-slate-100 hover:border-slate-400 transition">
+                                        Save Settings
+                                    </button>
+                                </div>
+                            </div>
+
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
                                 <input type="text" name="name" value="{{ old('name', $provider->name) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]" required>
@@ -80,15 +128,202 @@
                                 <input type="text" value="{{ $provider->driver }}" class="w-full rounded-lg border-gray-200 bg-slate-50 text-slate-500" disabled>
                             </div>
 
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Settings JSON</label>
-                                <textarea name="settings_json" rows="7" class="w-full rounded-lg border-gray-300 font-mono text-xs focus:border-[#1FA774] focus:ring-[#1FA774]">{{ old('settings_json', json_encode($provider->settings ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) }}</textarea>
-                            </div>
+                            @if($provider->supports_import)
+                                <div class="rounded-lg border border-emerald-100 bg-emerald-50/40 p-4 space-y-4">
+                                    <div>
+                                        <h4 class="text-sm font-semibold text-emerald-900">Import Settings</h4>
+                                        <p class="mt-1 text-xs text-emerald-700">These fields are saved into <span class="font-mono">settings.import</span> automatically.</p>
+                                    </div>
 
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Credentials JSON</label>
-                                <textarea name="credentials_json" rows="5" class="w-full rounded-lg border-gray-300 font-mono text-xs focus:border-[#1FA774] focus:ring-[#1FA774]">{{ old('credentials_json', json_encode($provider->credentials ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) }}</textarea>
-                            </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Import Query</label>
+                                        <input
+                                            type="text"
+                                            name="import_query"
+                                            value="{{ old('import_query', data_get($provider->settings, 'import.query')) }}"
+                                            class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]"
+                                            placeholder="snacks, beverages, cereal"
+                                        >
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Import Page Size</label>
+                                            <input
+                                                type="number"
+                                                name="import_page_size"
+                                                value="{{ old('import_page_size', data_get($provider->settings, 'import.page_size', 20)) }}"
+                                                class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]"
+                                                min="1"
+                                                max="100"
+                                            >
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Import Max Pages</label>
+                                            <input
+                                                type="number"
+                                                name="import_max_pages"
+                                                value="{{ old('import_max_pages', data_get($provider->settings, 'import.max_pages', 1)) }}"
+                                                class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]"
+                                                min="1"
+                                                max="20"
+                                            >
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
+
+                            @if($provider->provider_key === 'open_facts')
+                                <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
+                                    <div>
+                                        <h4 class="text-sm font-semibold text-slate-900">Provider Settings</h4>
+                                        <p class="mt-1 text-xs text-slate-600">Configure the Open Facts family endpoints used for scans and imports.</p>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Open Food Facts URL</label>
+                                        <input type="url" name="open_food_facts_base_url" value="{{ old('open_food_facts_base_url', data_get($provider->settings, 'sources.0.base_url', 'https://world.openfoodfacts.org/api/v2')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Open Beauty Facts URL</label>
+                                        <input type="url" name="open_beauty_facts_base_url" value="{{ old('open_beauty_facts_base_url', data_get($provider->settings, 'sources.1.base_url', 'https://world.openbeautyfacts.org/api/v2')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Open Product Facts URL</label>
+                                        <input type="url" name="open_product_facts_base_url" value="{{ old('open_product_facts_base_url', data_get($provider->settings, 'sources.2.base_url', 'https://world.openproductfacts.org/api/v2')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Open Pet Food Facts URL</label>
+                                        <input type="url" name="open_pet_food_facts_base_url" value="{{ old('open_pet_food_facts_base_url', data_get($provider->settings, 'sources.3.base_url', 'https://world.openpetfoodfacts.org/api/v2')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                </div>
+                            @elseif($provider->provider_key === 'upcitemdb')
+                                <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
+                                    <div>
+                                        <h4 class="text-sm font-semibold text-slate-900">Provider Settings</h4>
+                                        <p class="mt-1 text-xs text-slate-600">Trial mode works without credentials. Production mode requires a user key.</p>
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Mode</label>
+                                            <select name="upcitemdb_mode" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                                <option value="trial" @selected(old('upcitemdb_mode', data_get($provider->settings, 'mode', 'trial')) === 'trial')>Trial</option>
+                                                <option value="prod" @selected(old('upcitemdb_mode', data_get($provider->settings, 'mode', 'trial')) === 'prod')>Production</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Key Type</label>
+                                            <input type="text" name="upcitemdb_key_type" value="{{ old('upcitemdb_key_type', data_get($provider->settings, 'key_type', '3scale')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
+                                        <input type="url" name="upcitemdb_base_url" value="{{ old('upcitemdb_base_url', data_get($provider->settings, 'base_url', 'https://api.upcitemdb.com/prod/trial/lookup')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">User Key</label>
+                                        <input type="text" name="upcitemdb_user_key" value="{{ old('upcitemdb_user_key', data_get($provider->credentials, 'user_key')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]" placeholder="Required for production mode">
+                                    </div>
+                                </div>
+                            @elseif($provider->provider_key === 'barcode_lookup')
+                                <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
+                                    <div>
+                                        <h4 class="text-sm font-semibold text-slate-900">Provider Settings</h4>
+                                        <p class="mt-1 text-xs text-slate-600">Configure the Barcode Lookup endpoint and API key.</p>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
+                                        <input type="url" name="barcode_lookup_base_url" value="{{ old('barcode_lookup_base_url', data_get($provider->settings, 'base_url', 'https://api.barcodelookup.com/v3/products')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                                        <input type="text" name="barcode_lookup_api_key" value="{{ old('barcode_lookup_api_key', data_get($provider->credentials, 'api_key')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                </div>
+                            @elseif($provider->provider_key === 'edamam')
+                                <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
+                                    <div>
+                                        <h4 class="text-sm font-semibold text-slate-900">Provider Settings</h4>
+                                        <p class="mt-1 text-xs text-slate-600">Food-only enrichment. Add both the App ID and App Key to activate it.</p>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
+                                        <input type="url" name="edamam_base_url" value="{{ old('edamam_base_url', data_get($provider->settings, 'base_url', 'https://api.edamam.com/api/food-database/v2/parser')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                                            <input type="text" name="edamam_category" value="{{ old('edamam_category', data_get($provider->settings, 'category', 'packaged-foods')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Nutrition Type</label>
+                                            <input type="text" name="edamam_nutrition_type" value="{{ old('edamam_nutrition_type', data_get($provider->settings, 'nutrition_type', 'cooking')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                        </div>
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">App ID</label>
+                                            <input type="text" name="edamam_app_id" value="{{ old('edamam_app_id', data_get($provider->credentials, 'app_id')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">App Key</label>
+                                            <input type="text" name="edamam_app_key" value="{{ old('edamam_app_key', data_get($provider->credentials, 'app_key')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                        </div>
+                                    </div>
+                                </div>
+                            @elseif($provider->provider_key === 'gs1_us')
+                                <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
+                                    <div>
+                                        <h4 class="text-sm font-semibold text-slate-900">Provider Settings</h4>
+                                        <p class="mt-1 text-xs text-slate-600">Use the exact endpoint and request mapping from your GS1 US developer portal setup.</p>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
+                                        <input type="url" name="gs1_us_base_url" value="{{ old('gs1_us_base_url', data_get($provider->settings, 'base_url')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+
+                                    <div class="grid grid-cols-3 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">HTTP Method</label>
+                                            <select name="gs1_us_http_method" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                                <option value="GET" @selected(old('gs1_us_http_method', data_get($provider->settings, 'http_method', 'GET')) === 'GET')>GET</option>
+                                                <option value="POST" @selected(old('gs1_us_http_method', data_get($provider->settings, 'http_method', 'GET')) === 'POST')>POST</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Barcode Field</label>
+                                            <input type="text" name="gs1_us_barcode_field" value="{{ old('gs1_us_barcode_field', data_get($provider->settings, 'barcode_field', 'gtin')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Barcode Path</label>
+                                            <input type="text" name="gs1_us_barcode_path" value="{{ old('gs1_us_barcode_path', data_get($provider->settings, 'barcode_path', 'gtin')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                        </div>
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                                            <input type="text" name="gs1_us_api_key" value="{{ old('gs1_us_api_key', data_get($provider->credentials, 'api_key')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Account ID</label>
+                                            <input type="text" name="gs1_us_account_id" value="{{ old('gs1_us_account_id', data_get($provider->credentials, 'account_id')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]" placeholder="Optional">
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
 
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
@@ -96,7 +331,7 @@
                             </div>
 
                             <div class="flex items-center justify-between gap-3">
-                                <button type="submit" class="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-700 transition">Save Settings</button>
+                                <button type="submit" class="px-4 py-2 rounded-lg border border-slate-300 bg-white text-black hover:bg-slate-100 hover:border-slate-400 transition">Save Settings</button>
                             </div>
                         </form>
 

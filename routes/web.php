@@ -60,6 +60,7 @@ Route::middleware(['auth', AdminMiddleware::class])
         Route::get('/scanning/providers', [ScanProviderController::class, 'index'])->middleware('can:scanning.manage')->name('scanning.providers.index');
         Route::post('/scanning/providers/{scanProvider}', [ScanProviderController::class, 'update'])->middleware('can:scanning.manage')->name('scanning.providers.update');
         Route::post('/scanning/providers/{scanProvider}/toggle-active', [ScanProviderController::class, 'toggleActive'])->middleware('can:scanning.manage')->name('scanning.providers.toggle-active');
+        Route::post('/scanning/providers/{scanProvider}/sync-products', [ScanProviderController::class, 'syncProducts'])->middleware('can:scanning.manage')->name('scanning.providers.sync-products');
         Route::get('/support', [AdminSupportCaseController::class, 'index'])->middleware('can:support.view')->name('support.index');
         Route::get('/support/create', [AdminSupportCaseController::class, 'create'])->middleware('can:support.manage')->name('support.create');
         Route::post('/support', [AdminSupportCaseController::class, 'store'])->middleware('can:support.manage')->name('support.store');

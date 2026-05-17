@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Contracts\ProductCatalogImportProvider;
 use App\Contracts\ProductCatalogProvider;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\App;
@@ -9,7 +10,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-class OpenFoodFactsService implements ProductCatalogProvider
+class OpenFoodFactsService implements ProductCatalogImportProvider, ProductCatalogProvider
 {
     protected bool $verifySsl;
 
@@ -53,17 +54,17 @@ class OpenFoodFactsService implements ProductCatalogProvider
         });
     }
 
-    public function searchProducts(string $query, int $page = 1, int $pageSize = 20): array
+    public function searchProducts(string $query, int $page = 1, int $pageSize = 20, array $settings = [], array $credentials = []): array
     {
-        $settings = $this->resolveSettings();
-        $primarySource = $settings['sources'][0] ?? null;
+        $resolvedSettings = $this->resolveSettings($settings);
+        $primarySource = $resolvedSettings['sources'][0] ?? null;
 
         if ($primarySource === null) {
             return ['products' => [], 'total' => 0, 'page' => $page, 'page_count' => 0];
         }
 
         try {
-            $response = $this->createHttpClient($settings)->get("{$primarySource['base_url']}/search", [
+            $response = $this->createHttpClient($resolvedSettings)->get("{$primarySource['base_url']}/search", [
                 'search_terms' => $query,
                 'page' => $page,
                 'page_size' => $pageSize,
@@ -139,10 +140,11 @@ class OpenFoodFactsService implements ProductCatalogProvider
         $ingredients = $this->extractIngredients($data);
         $nutrition = $this->extractNutrition($data);
         $packaging = $this->extractPackaging($data);
+        $name = $this->resolveProductName($data);
 
         return [
             'barcode' => (string) ($data['code'] ?? ''),
-            'name' => $data['product_name'] ?? $data['generic_name'] ?? $data['abbreviated_product_name'] ?? 'Unknown Product',
+            'name' => $name,
             'brand' => $data['brands'] ?? $data['brand_owner'] ?? null,
             'category_id' => null,
             'image_url' => $data['image_url'] ?? $data['image_front_url'] ?? $data['image_front_small_url'] ?? null,
@@ -155,6 +157,23 @@ class OpenFoodFactsService implements ProductCatalogProvider
             'preliminary_score' => $this->calculatePreliminaryScore($ingredients, $nutrition, $packaging, $data),
             'raw_data' => $data,
         ];
+    }
+
+    protected function resolveProductName(array $data): string
+    {
+        foreach ([
+            $data['product_name'] ?? null,
+            $data['generic_name'] ?? null,
+            $data['abbreviated_product_name'] ?? null,
+        ] as $candidate) {
+            $value = trim((string) $candidate);
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return 'Unknown Product';
     }
 
     protected function createHttpClient(array $settings): PendingRequest
