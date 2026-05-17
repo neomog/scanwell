@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\PlanFeatureException;
+use App\Http\Requests\ImageScanRequest;
 use App\Http\Requests\ScanRequest;
 use App\Http\Resources\ProductContributionResource;
 use App\Http\Resources\ProductResource;
@@ -11,6 +12,7 @@ use App\Models\Product;
 use App\Models\Scan;
 use App\Models\UserPreference;
 use App\Services\ProductAnalysisService;
+use App\Services\ProductImageAnalysisService;
 use App\Services\ProductContributionService;
 use App\Services\SubscriptionManager;
 use Error;
@@ -22,6 +24,7 @@ class ScanController extends Controller
 {
     public function __construct(
         protected ProductAnalysisService $analysisService,
+        protected ProductImageAnalysisService $productImageAnalysisService,
         protected ProductContributionService $productContributionService,
         protected SubscriptionManager $subscriptionManager
     ) {
@@ -80,18 +83,7 @@ class ScanController extends Controller
                 $alternatives = $this->findAlternatives($product);
             }
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Product scanned successfully',
-                'data' => [
-                    'scan' => new ScanResource($scan->fresh('product')),
-                    'product' => new ProductResource($product),
-                    'personalized_warnings' => $personalizedWarnings,
-                    'alternatives' => $alternatives ? ProductResource::collection($alternatives) : [],
-                    'score_interpretation' => $this->interpretScore($score, $product),
-                    'remaining_monthly_scans' => $this->subscriptionManager->remainingMonthlyScans(Auth::user()),
-                ],
-            ]);
+            return $this->successResponse($scan, $product, $personalizedWarnings, $alternatives);
         } catch (PlanFeatureException $e) {
             return response()->json([
                 'success' => false,
@@ -126,6 +118,107 @@ class ScanController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to scan product',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function scanImage(ImageScanRequest $request): JsonResponse
+    {
+        try {
+            $this->subscriptionManager->ensureFeature(Auth::user(), 'scans.enabled');
+            $this->subscriptionManager->enforceMonthlyScanLimit(Auth::user());
+
+            $validated = $request->validated();
+            $seedBarcode = $validated['barcode_hint'] ?? 'image-scan';
+
+            $scan = Scan::create([
+                'user_id' => Auth::id(),
+                'barcode' => $seedBarcode,
+                'scan_timestamp' => now(),
+                'device_type' => $request->userAgent(),
+                'status' => 'pending',
+                'scan_metadata' => [
+                    'ip' => $request->ip(),
+                    'source' => 'mobile_app',
+                    'scan_mode' => 'image',
+                    'latitude' => $validated['latitude'] ?? null,
+                    'longitude' => $validated['longitude'] ?? null,
+                ],
+            ]);
+
+            $imageAnalysis = $this->productImageAnalysisService->analyze(
+                $request->file('image'),
+                $validated,
+                Auth::id(),
+                $scan
+            );
+
+            $product = $imageAnalysis['product']
+                ->load(['ingredients', 'nutrition', 'foodScore', 'cosmeticScore', 'images', 'barcodes']);
+
+            $scan->forceFill([
+                'barcode' => $imageAnalysis['barcode'] ?? $scan->barcode,
+            ])->save();
+
+            $lookupSummary = $this->analysisService->lastLookupSummary();
+
+            $scan->markAsCompleted($product, [
+                'matched_provider' => data_get($product->raw_data, '_scanwell.source'),
+                'product_family' => $product->resolved_product_family,
+                'confidence' => $imageAnalysis['confidence'] ?? data_get($product->raw_data, '_scanwell.confidence'),
+                'matched_by' => $imageAnalysis['matched_by'] ?? 'image',
+                'analysis_source' => $imageAnalysis['analysis_source'] ?? null,
+                'provider_lookup' => $lookupSummary,
+                'image_scan' => [
+                    'stored_image' => $imageAnalysis['stored_image'] ?? null,
+                    'signals' => $imageAnalysis['signals'] ?? [],
+                ],
+            ]);
+
+            $personalizedWarnings = $this->personalizedWarnings($product);
+            $alternatives = $this->alternativesFor($product);
+
+            return $this->successResponse($scan, $product, $personalizedWarnings, $alternatives);
+        } catch (PlanFeatureException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'feature' => $e->feature,
+            ], 403);
+        } catch (Exception|Error $e) {
+            if (isset($scan)) {
+                $scan->markAsFailed($e->getMessage(), [
+                    'provider_lookup' => $this->analysisService->lastLookupSummary(),
+                ]);
+            }
+
+            if ((int) $e->getCode() === 404) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Product not found',
+                    'data' => [
+                        'scan' => isset($scan) ? new ScanResource($scan) : null,
+                        'product' => null,
+                        'pending_contribution' => null,
+                    ],
+                ], 404);
+            }
+
+            if ((int) $e->getCode() === 422) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                    'data' => [
+                        'scan' => isset($scan) ? new ScanResource($scan) : null,
+                        'product' => null,
+                    ],
+                ], 422);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to scan product image',
                 'error' => $e->getMessage(),
             ], 500);
         }
@@ -193,6 +286,50 @@ class ScanController extends Controller
             })
             ->limit(3)
             ->get();
+    }
+
+    protected function personalizedWarnings(Product $product): array
+    {
+        if (!Auth::check()) {
+            return [];
+        }
+
+        $preferences = UserPreference::where('user_id', Auth::id())->first();
+
+        if (!$preferences) {
+            return [];
+        }
+
+        return $preferences->getPersonalizedWarnings($product);
+    }
+
+    protected function alternativesFor(Product $product): ?object
+    {
+        $score = $product->foodScore->overall_score ?? $product->cosmeticScore->overall_score;
+
+        if ($score === null || $score >= 50) {
+            return null;
+        }
+
+        return $this->findAlternatives($product);
+    }
+
+    protected function successResponse(Scan $scan, Product $product, array $personalizedWarnings, ?object $alternatives): JsonResponse
+    {
+        $score = $product->foodScore->overall_score ?? $product->cosmeticScore->overall_score;
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Product scanned successfully',
+            'data' => [
+                'scan' => new ScanResource($scan->fresh('product')),
+                'product' => new ProductResource($product),
+                'personalized_warnings' => $personalizedWarnings,
+                'alternatives' => $alternatives ? ProductResource::collection($alternatives) : [],
+                'score_interpretation' => $this->interpretScore($score, $product),
+                'remaining_monthly_scans' => $this->subscriptionManager->remainingMonthlyScans(Auth::user()),
+            ],
+        ]);
     }
 
     protected function interpretScore(?float $score, ?Product $product = null): array

@@ -67,6 +67,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
     // Scan routes
     Route::post('/scan', [ScanController::class, 'scan']);
+    Route::post('/scan/image', [ScanController::class, 'scanImage']);
     Route::get('/scans', [ScanController::class, 'history']);
     Route::get('/scans/{id}', [ScanController::class, 'show']);
     Route::delete('/scans/{id}', [ScanController::class, 'destroy']);
