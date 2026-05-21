@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ImageScanIdentificationException;
 use App\Exceptions\PlanFeatureException;
 use App\Http\Requests\ImageScanRequest;
 use App\Http\Requests\ScanRequest;
@@ -90,6 +91,25 @@ class ScanController extends Controller
                 'message' => $e->getMessage(),
                 'feature' => $e->feature,
             ], 403);
+        } catch (ImageScanIdentificationException $e) {
+            if (isset($scan)) {
+                $scan->markAsFailed($e->getMessage(), [
+                    'provider_lookup' => $this->analysisService->lastLookupSummary(),
+                    'error_code' => $e->errorCode,
+                    'match_context' => $e->context,
+                ]);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'error_code' => $e->errorCode,
+                'data' => [
+                    'scan' => isset($scan) ? new ScanResource($scan->fresh()) : null,
+                    'product' => null,
+                    'match_context' => $e->context,
+                ],
+            ], $e->getCode() > 0 ? $e->getCode() : 422);
         } catch (Exception|Error $e) {
             if (isset($scan)) {
                 $scan->markAsFailed($e->getMessage(), [
@@ -192,29 +212,6 @@ class ScanController extends Controller
                 $scan->markAsFailed($e->getMessage(), [
                     'provider_lookup' => $this->analysisService->lastLookupSummary(),
                 ]);
-            }
-
-            if ((int) $e->getCode() === 404) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Product not found',
-                    'data' => [
-                        'scan' => isset($scan) ? new ScanResource($scan) : null,
-                        'product' => null,
-                        'pending_contribution' => null,
-                    ],
-                ], 404);
-            }
-
-            if ((int) $e->getCode() === 422) {
-                return response()->json([
-                    'success' => false,
-                    'message' => $e->getMessage(),
-                    'data' => [
-                        'scan' => isset($scan) ? new ScanResource($scan) : null,
-                        'product' => null,
-                    ],
-                ], 422);
             }
 
             return response()->json([

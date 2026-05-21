@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Exceptions\ImageScanIdentificationException;
 use App\Models\Product;
 use App\Models\Scan;
 use Exception;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class ProductImageAnalysisService
@@ -25,6 +27,7 @@ class ProductImageAnalysisService
             $image->getMimeType() ?: 'image/jpeg'
         );
         $signals = $this->extractSignals($input, $ocrOutput ?? []);
+        $this->storeDebugSignalsOnScan($scan, $storedImage, $ocrOutput, $signals);
 
         if ($signals['barcode'] !== null) {
             try {
@@ -46,7 +49,30 @@ class ProductImageAnalysisService
                 if ((int) $exception->getCode() !== 404) {
                     throw $exception;
                 }
+
+                Log::info('Image scan barcode match missed product catalog', [
+                    'scan_id' => $scan?->id,
+                    'barcode' => $signals['barcode'],
+                    'barcode_source' => $signals['barcode_source'],
+                    'analysis_source' => $signals['analysis_source'],
+                ]);
+
+                throw new ImageScanIdentificationException(
+                    'barcode_not_found',
+                    'We found a barcode in the image, but this product is not in our catalog yet.',
+                    404,
+                    $this->buildMatchContext($signals)
+                );
             }
+        }
+
+        if ($this->hasNoUsableSignals($signals)) {
+            throw new ImageScanIdentificationException(
+                'ocr_unreadable',
+                'We could not read enough product information from the image. Please retake the photo with the label or barcode clearly visible.',
+                422,
+                $this->buildMatchContext($signals)
+            );
         }
 
         $candidate = $this->matchLocalProductByNormalizedIdentity($signals)
@@ -67,9 +93,21 @@ class ProductImageAnalysisService
             ];
         }
 
-        throw new Exception(
-            'We could not confidently identify this product from the uploaded image.',
-            422
+        Log::info('Image scan could not identify product', [
+            'scan_id' => $scan?->id,
+            'analysis_source' => $signals['analysis_source'],
+            'barcode' => $signals['barcode'],
+            'barcode_source' => $signals['barcode_source'],
+            'product_name' => $signals['product_name'],
+            'brand' => $signals['brand'],
+            'ocr_provider' => $signals['ocr_provider'],
+        ]);
+
+        throw new ImageScanIdentificationException(
+            'ocr_text_no_catalog_match',
+            $this->unmatchedCatalogTextMessage($signals),
+            404,
+            $this->buildMatchContext($signals)
         );
     }
 
@@ -353,5 +391,69 @@ class ProductImageAnalysisService
             ->unique()
             ->values()
             ->all();
+    }
+
+    protected function storeDebugSignalsOnScan(?Scan $scan, array $storedImage, ?array $ocrOutput, array $signals): void
+    {
+        if ($scan === null) {
+            return;
+        }
+
+        $scan->update([
+            'scan_metadata' => array_merge($scan->scan_metadata ?? [], [
+                'image_scan' => [
+                    'stored_image' => $storedImage,
+                    'ocr' => $ocrOutput,
+                    'signals' => $signals,
+                ],
+            ]),
+        ]);
+    }
+
+    protected function hasNoUsableSignals(array $signals): bool
+    {
+        return ($signals['barcode'] ?? null) === null
+            && ($signals['product_name'] ?? null) === null
+            && ($signals['brand'] ?? null) === null
+            && ($signals['extracted_text'] ?? null) === null;
+    }
+
+    protected function buildMatchContext(array $signals): array
+    {
+        return [
+            'barcode' => $signals['barcode'] ?? null,
+            'barcode_source' => $signals['barcode_source'] ?? null,
+            'product_name' => $signals['product_name'] ?? null,
+            'brand' => $signals['brand'] ?? null,
+            'extracted_text' => $signals['extracted_text'] ?? null,
+            'ocr_provider' => $signals['ocr_provider'] ?? null,
+            'ocr_mode' => $signals['ocr_mode'] ?? null,
+            'analysis_source' => $signals['analysis_source'] ?? null,
+        ];
+    }
+
+    protected function unmatchedCatalogTextMessage(array $signals): string
+    {
+        $extractedText = $this->nullableString($signals['extracted_text'] ?? null);
+
+        if ($extractedText === null) {
+            return 'We extracted product label text from the image, but it does not match any product in our catalog.';
+        }
+
+        return sprintf(
+            'We extracted product label text from the image, but it does not match any product in our catalog. Extracted text: "%s".',
+            $this->limitText($extractedText, 160)
+        );
+    }
+
+    protected function limitText(string $value, int $maxLength): string
+    {
+        $value = preg_replace('/\s+/', ' ', trim($value)) ?? '';
+
+        if (strlen($value) <= $maxLength) {
+            return $value;
+        }
+
+        return rtrim(substr($value, 0, $maxLength - 3)) . '...';
     }
 }

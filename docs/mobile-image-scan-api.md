@@ -250,39 +250,85 @@ Sample response:
 }
 ```
 
-## 422 Response
+## Failure Responses
 
-If the backend cannot confidently identify the product from the image:
-
-```json
-{
-  "success": false,
-  "message": "We could not confidently identify this product from the uploaded image.",
-  "data": {
-    "scan": {
-      "id": "a9c3c4d2-5f87-4fc8-8d35-0f95db7d2abc",
-      "status": "failed"
-    },
-    "product": null
-  }
-}
-```
-
-## 404 Response
-
-If a barcode was extracted but no catalog product was found:
+If the backend cannot read enough product information from the image:
 
 ```json
 {
   "success": false,
-  "message": "Product not found",
+  "message": "We could not read enough product information from the image. Please retake the photo with the label or barcode clearly visible.",
+  "error_code": "ocr_unreadable",
   "data": {
     "scan": {
       "id": "a9c3c4d2-5f87-4fc8-8d35-0f95db7d2abc",
       "status": "failed"
     },
     "product": null,
-    "pending_contribution": null
+    "match_context": {
+      "barcode": null,
+      "barcode_source": null,
+      "product_name": null,
+      "brand": null,
+      "extracted_text": null,
+      "ocr_provider": "google_cloud_vision",
+      "ocr_mode": "DOCUMENT_TEXT_DETECTION",
+      "analysis_source": "google_cloud_vision"
+    }
+  }
+}
+```
+
+If a barcode was extracted but no catalog product was found:
+
+```json
+{
+  "success": false,
+  "message": "We found a barcode in the image, but this product is not in our catalog yet.",
+  "error_code": "barcode_not_found",
+  "data": {
+    "scan": {
+      "id": "a9c3c4d2-5f87-4fc8-8d35-0f95db7d2abc",
+      "status": "failed"
+    },
+    "product": null,
+    "match_context": {
+      "barcode": "12345678",
+      "barcode_source": "ocr_barcode_hint",
+      "product_name": "Purified Water",
+      "brand": "Kirkland",
+      "extracted_text": "Kirkland Purified Water 12345678",
+      "ocr_provider": "google_cloud_vision",
+      "ocr_mode": "DOCUMENT_TEXT_DETECTION",
+      "analysis_source": "google_cloud_vision"
+    }
+  }
+}
+```
+
+If OCR text was extracted but it did not match any product in the catalog:
+
+```json
+{
+  "success": false,
+  "message": "We extracted product label text from the image, but it does not match any product in our catalog.",
+  "error_code": "ocr_text_no_catalog_match",
+  "data": {
+    "scan": {
+      "id": "a9c3c4d2-5f87-4fc8-8d35-0f95db7d2abc",
+      "status": "failed"
+    },
+    "product": null,
+    "match_context": {
+      "barcode": null,
+      "barcode_source": null,
+      "product_name": "Purified Water",
+      "brand": "Kirkland",
+      "extracted_text": "Kirkland Purified Water 12345678",
+      "ocr_provider": "google_cloud_vision",
+      "ocr_mode": "DOCUMENT_TEXT_DETECTION",
+      "analysis_source": "google_cloud_vision"
+    }
   }
 }
 ```
@@ -320,4 +366,10 @@ Recommended client behavior:
 
 1. If the response is `200`, show the normal scan result screen.
 2. If the response is `422`, ask the user to retake the photo or crop closer to the label.
-3. If the response is `404`, offer manual contribution if that flow exists in the app.
+3. If the response is `404`, offer manual contribution or manual search if that flow exists in the app.
+
+Recommended handling by `error_code`:
+
+- `ocr_unreadable`: ask the user to retake the image with a clearer label or barcode
+- `barcode_not_found`: offer manual contribution because the barcode was found but the product is not in the catalog
+- `ocr_text_no_catalog_match`: offer manual search or contribution because OCR worked but no catalog match was found
