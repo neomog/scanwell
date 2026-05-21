@@ -93,6 +93,8 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('/support/cases/{supportCase}/close', [ApiSupportCaseController::class, 'close']);
 
     // Product contributions
+    Route::post('/contributions/ingredients/extract', [ProductContributionController::class, 'extractIngredients'])
+        ->middleware('plan.feature:contributions.enabled');
     Route::post('/products/{barcode}/contribute', [ProductContributionController::class, 'store'])
         ->middleware('plan.feature:contributions.enabled');
     Route::put('/my-contributions/{id}', [ProductContributionController::class, 'update']);

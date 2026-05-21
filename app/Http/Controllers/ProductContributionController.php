@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\IngredientImageExtractRequest;
 use App\Http\Resources\ProductContributionResource;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
 use App\Models\ProductContribution;
 use App\Services\ContributionReputationService;
+use App\Services\IngredientImageExtractionService;
 use App\Services\ProductContributionService;
 use App\Services\ProductPayloadService;
 use Illuminate\Http\JsonResponse;
@@ -20,8 +22,27 @@ class ProductContributionController extends Controller
     public function __construct(
         protected ProductContributionService $productContributionService,
         protected ProductPayloadService $productPayloadService,
-        protected ContributionReputationService $contributionReputationService
+        protected ContributionReputationService $contributionReputationService,
+        protected IngredientImageExtractionService $ingredientImageExtractionService
     ) {
+    }
+
+    public function extractIngredients(IngredientImageExtractRequest $request): JsonResponse
+    {
+        $result = $this->ingredientImageExtractionService->extractFromImage($request->file('image'));
+
+        if ($result === null) {
+            return response()->json([
+                'success' => false,
+                'message' => 'We could not extract a readable ingredient list from the image. Please retake the photo with the ingredients panel clearly visible.',
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Ingredients extracted successfully',
+            'data' => $result,
+        ]);
     }
 
     public function store(Request $request, string $barcode): JsonResponse
