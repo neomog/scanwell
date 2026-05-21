@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Notifications\ApiResetPasswordNotification;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -167,6 +168,11 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasOne(Subscription::class)
             ->whereIn('status', Subscription::CURRENT_STATUSES)
             ->latestOfMany('created_at');
+    }
+
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new ApiResetPasswordNotification($token));
     }
 
     public function roleDefinition(): BelongsTo

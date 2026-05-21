@@ -53,6 +53,7 @@ return [
     */
 
     'url' => env('APP_URL', 'http://localhost'),
+    'mobile_reset_password_url' => env('MOBILE_RESET_PASSWORD_URL'),
 
     /*
     |--------------------------------------------------------------------------
