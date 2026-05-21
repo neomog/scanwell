@@ -102,11 +102,12 @@ return [
         'retry_attempts' => env('GS1_US_RETRY_ATTEMPTS', 1),
     ],
 
-    'openai' => [
-        'api_key' => env('OPENAI_API_KEY'),
-        'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
-        'image_recognition_model' => env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini'),
-        'timeout' => env('OPENAI_TIMEOUT', 30),
+    'google_cloud_vision' => [
+        'base_url' => env('GOOGLE_CLOUD_VISION_BASE_URL', 'https://vision.googleapis.com/v1'),
+        'token_url' => env('GOOGLE_CLOUD_TOKEN_URL', 'https://oauth2.googleapis.com/token'),
+        'credentials_path' => env('GOOGLE_CLOUD_VISION_CREDENTIALS_PATH'),
+        'credentials_json' => env('GOOGLE_CLOUD_VISION_CREDENTIALS_JSON'),
+        'timeout' => env('GOOGLE_CLOUD_VISION_TIMEOUT', 30),
     ],
 
 ];

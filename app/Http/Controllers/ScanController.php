@@ -172,6 +172,7 @@ class ScanController extends Controller
                 'provider_lookup' => $lookupSummary,
                 'image_scan' => [
                     'stored_image' => $imageAnalysis['stored_image'] ?? null,
+                    'ocr' => $imageAnalysis['ocr'] ?? null,
                     'signals' => $imageAnalysis['signals'] ?? [],
                 ],
             ]);

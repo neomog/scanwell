@@ -6,24 +6,25 @@ use App\Models\Product;
 use App\Models\Scan;
 use Exception;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 
 class ProductImageAnalysisService
 {
     public function __construct(
         protected ProductAnalysisService $productAnalysisService,
-        protected OpenAiVisionService $openAiVisionService
+        protected GoogleCloudVisionService $googleCloudVisionService
     ) {
     }
 
     public function analyze(UploadedFile $image, array $input, ?string $userId = null, ?Scan $scan = null): array
     {
         $storedImage = $this->storeImage($image);
-        $visionSignals = $this->openAiVisionService->analyzeProductImage(
+        $ocrOutput = $this->googleCloudVisionService->analyzeProductImage(
             (string) file_get_contents($image->getRealPath()),
             $image->getMimeType() ?: 'image/jpeg'
         );
-        $signals = $this->extractSignals($input, $visionSignals ?? []);
+        $signals = $this->extractSignals($input, $ocrOutput ?? []);
 
         if ($signals['barcode'] !== null) {
             try {
@@ -32,13 +33,14 @@ class ProductImageAnalysisService
                 return [
                     'product' => $product,
                     'barcode' => $signals['barcode'],
-                    'matched_by' => $visionSignals !== null && ($visionSignals['barcode'] ?? null) === $signals['barcode']
-                        ? 'image_barcode'
-                        : 'image_barcode_hint',
-                    'confidence' => $signals['confidence'] ?? 95,
-                    'analysis_source' => $visionSignals !== null ? 'openai_vision' : 'barcode_hint',
+                    'matched_by' => $signals['barcode_source'] === 'client_hint'
+                        ? 'image_barcode_hint'
+                        : 'image_barcode',
+                    'confidence' => $signals['confidence'] ?? 0.0,
+                    'analysis_source' => $signals['analysis_source'],
                     'stored_image' => $storedImage,
                     'signals' => $signals,
+                    'ocr' => $ocrOutput,
                 ];
             } catch (Exception $exception) {
                 if ((int) $exception->getCode() !== 404) {
@@ -47,7 +49,8 @@ class ProductImageAnalysisService
             }
         }
 
-        $candidate = $this->matchLocalProductFromSignals($signals);
+        $candidate = $this->matchLocalProductByNormalizedIdentity($signals)
+            ?? $this->matchLocalProductFromAliases($signals);
 
         if ($candidate !== null) {
             $product = $this->productAnalysisService->analyzeByBarcode($candidate['product']->barcode, $userId, $scan);
@@ -55,16 +58,17 @@ class ProductImageAnalysisService
             return [
                 'product' => $product,
                 'barcode' => $candidate['product']->barcode,
-                'matched_by' => 'image_text_match',
+                'matched_by' => $candidate['matched_by'],
                 'confidence' => $candidate['confidence'],
-                'analysis_source' => $visionSignals !== null ? 'openai_vision_local_catalog_match' : 'local_catalog_text_match',
+                'analysis_source' => $signals['analysis_source'],
                 'stored_image' => $storedImage,
                 'signals' => $signals,
+                'ocr' => $ocrOutput,
             ];
         }
 
         throw new Exception(
-            'We could not confidently identify this product from the uploaded image. Include a barcode hint or OCR text for now.',
+            'We could not confidently identify this product from the uploaded image.',
             422
         );
     }
@@ -83,44 +87,61 @@ class ProductImageAnalysisService
         ];
     }
 
-    protected function extractSignals(array $input, array $visionSignals = []): array
+    protected function extractSignals(array $input, array $ocrOutput = []): array
     {
         $extractedText = $this->nullableString($input['extracted_text'] ?? null)
-            ?? $this->nullableString($visionSignals['extracted_text'] ?? null);
+            ?? $this->nullableString($ocrOutput['extracted_text'] ?? null);
         $productName = $this->nullableString($input['product_name'] ?? null)
-            ?? $this->nullableString($visionSignals['product_name'] ?? null);
+            ?? $this->nullableString($ocrOutput['product_name'] ?? null);
         $brand = $this->nullableString($input['brand'] ?? null)
-            ?? $this->nullableString($visionSignals['brand'] ?? null);
-        $barcode = $this->resolveBarcode(
-            $this->nullableString($input['barcode_hint'] ?? null)
-                ?? $this->nullableString($visionSignals['barcode'] ?? null),
+            ?? $this->nullableString($ocrOutput['brand'] ?? null);
+
+        $resolvedBarcode = $this->resolveBarcode(
+            $this->nullableString($input['barcode_hint'] ?? null),
+            $this->nullableString($ocrOutput['barcode_hint'] ?? null),
             $extractedText
         );
 
         return [
-            'barcode' => $barcode,
+            'barcode' => $resolvedBarcode['barcode'],
+            'barcode_source' => $resolvedBarcode['source'],
             'product_name' => $productName,
+            'normalized_product_name' => $this->normalizeText($productName),
             'brand' => $brand,
+            'normalized_brand' => $this->normalizeText($brand),
             'extracted_text' => $extractedText,
-            'category_hint' => $this->nullableString($visionSignals['category_hint'] ?? null),
-            'confidence' => isset($visionSignals['confidence']) && is_numeric($visionSignals['confidence'])
-                ? max(0, min(100, (int) $visionSignals['confidence']))
+            'normalized_extracted_text' => $this->normalizeText($extractedText),
+            'confidence' => isset($ocrOutput['confidence']) && is_numeric($ocrOutput['confidence'])
+                ? round(max(0, min(1, (float) $ocrOutput['confidence'])), 4)
                 : null,
-            'front_label_visible' => (bool) ($visionSignals['front_label_visible'] ?? false),
-            'barcode_visible' => (bool) ($visionSignals['barcode_visible'] ?? false),
-            'nutrition_panel_visible' => (bool) ($visionSignals['nutrition_panel_visible'] ?? false),
-            'ingredients_visible' => (bool) ($visionSignals['ingredients_visible'] ?? false),
+            'analysis_source' => isset($ocrOutput['provider']) ? 'google_cloud_vision' : 'client_hints',
+            'ocr_provider' => $this->nullableString($ocrOutput['provider'] ?? null),
+            'ocr_mode' => $this->nullableString($ocrOutput['mode'] ?? null),
+            'ocr_output' => $ocrOutput,
         ];
     }
 
-    protected function resolveBarcode(?string $barcodeHint, ?string $extractedText): ?string
+    protected function resolveBarcode(?string $clientBarcodeHint, ?string $ocrBarcodeHint, ?string $extractedText): array
     {
-        if ($barcodeHint !== null) {
-            return $barcodeHint;
+        if ($clientBarcodeHint !== null) {
+            return [
+                'barcode' => $clientBarcodeHint,
+                'source' => 'client_hint',
+            ];
+        }
+
+        if ($ocrBarcodeHint !== null) {
+            return [
+                'barcode' => $ocrBarcodeHint,
+                'source' => 'ocr_barcode_hint',
+            ];
         }
 
         if ($extractedText === null) {
-            return null;
+            return [
+                'barcode' => null,
+                'source' => null,
+            ];
         }
 
         preg_match_all('/(?<!\d)(\d{8,13})(?!\d)/', $extractedText, $matches);
@@ -129,83 +150,88 @@ class ProductImageAnalysisService
             $candidate = trim((string) $candidate);
 
             if ($candidate !== '') {
-                return $candidate;
+                return [
+                    'barcode' => $candidate,
+                    'source' => 'ocr_text',
+                ];
             }
         }
 
-        return null;
+        return [
+            'barcode' => null,
+            'source' => null,
+        ];
     }
 
-    protected function matchLocalProductFromSignals(array $signals): ?array
+    protected function matchLocalProductByNormalizedIdentity(array $signals): ?array
     {
-        $productName = strtolower((string) ($signals['product_name'] ?? ''));
-        $brand = strtolower((string) ($signals['brand'] ?? ''));
-        $extractedText = strtolower((string) ($signals['extracted_text'] ?? ''));
+        $productName = $signals['normalized_product_name'] ?? '';
+        $brand = $signals['normalized_brand'] ?? '';
 
-        if ($productName === '' && $brand === '' && $extractedText === '') {
+        if ($productName === '' || $brand === '') {
             return null;
         }
 
-        $query = Product::query()
-            ->where(function ($builder) use ($productName, $brand, $extractedText) {
-                if ($productName !== '') {
-                    $builder->orWhere('name', 'like', '%' . $productName . '%');
-                }
+        $product = Product::query()
+            ->whereRaw('LOWER(name) = ?', [$productName])
+            ->whereRaw('LOWER(COALESCE(brand, \'\')) = ?', [$brand])
+            ->first();
 
-                if ($brand !== '') {
-                    $builder->orWhere('brand', 'like', '%' . $brand . '%');
-                }
+        if ($product === null) {
+            return null;
+        }
 
-                if ($extractedText !== '') {
-                    $builder->orWhere('name', 'like', '%' . $extractedText . '%');
+        return [
+            'product' => $product,
+            'matched_by' => 'image_brand_product_match',
+            'confidence' => 0.95,
+        ];
+    }
+
+    protected function matchLocalProductFromAliases(array $signals): ?array
+    {
+        $tokens = $this->searchTokens($signals);
+
+        if ($tokens->isEmpty()) {
+            return null;
+        }
+
+        $products = Product::query()
+            ->with('barcodes')
+            ->where(function ($builder) use ($tokens) {
+                foreach ($tokens as $token) {
+                    $builder->orWhere('name', 'like', '%' . $token . '%')
+                        ->orWhere('brand', 'like', '%' . $token . '%')
+                        ->orWhere('raw_data', 'like', '%' . $token . '%')
+                        ->orWhere('manual_overrides', 'like', '%' . $token . '%')
+                        ->orWhereHas('barcodes', fn ($barcodeQuery) => $barcodeQuery->where('barcode', 'like', '%' . $token . '%'));
                 }
             })
-            ->limit(10)
+            ->limit(25)
             ->get();
 
-        if ($query->isEmpty()) {
+        if ($products->isEmpty()) {
             return null;
         }
 
-        $ranked = $query->map(function (Product $product) use ($productName, $brand, $extractedText) {
-            $score = 0;
-            $name = strtolower((string) $product->name);
-            $productBrand = strtolower((string) $product->brand);
-
-            if ($productName !== '') {
-                if ($name === $productName) {
-                    $score += 70;
-                } elseif (str_contains($name, $productName) || str_contains($productName, $name)) {
-                    $score += 45;
-                }
-            }
-
-            if ($brand !== '') {
-                if ($productBrand === $brand) {
-                    $score += 25;
-                } elseif ($productBrand !== '' && (str_contains($productBrand, $brand) || str_contains($brand, $productBrand))) {
-                    $score += 15;
-                }
-            }
-
-            if ($extractedText !== '' && $name !== '' && str_contains($extractedText, $name)) {
-                $score += 15;
-            }
+        $ranked = $products->map(function (Product $product) use ($signals) {
+            $score = $this->aliasMatchScore($product, $signals);
 
             return [
                 'product' => $product,
-                'confidence' => min(90, $score),
+                'matched_by' => 'image_alias_text_match',
+                'confidence' => round(min(0.9, $score), 4),
             ];
         })->sortByDesc('confidence')->values();
 
         $best = $ranked->first();
         $second = $ranked->get(1);
 
-        if ($best === null || $best['confidence'] < 60) {
+        if ($best === null || $best['confidence'] < 0.55) {
             return null;
         }
 
-        if ($second !== null && ($best['confidence'] - $second['confidence']) < 10) {
+        if ($second !== null && ($best['confidence'] - $second['confidence']) < 0.1) {
             return null;
         }
 
@@ -221,5 +247,111 @@ class ProductImageAnalysisService
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    protected function normalizeText(?string $value): string
+    {
+        if ($value === null) {
+            return '';
+        }
+
+        $value = strtolower($value);
+        $value = preg_replace('/[^a-z0-9]+/', ' ', $value) ?? '';
+
+        return trim($value);
+    }
+
+    protected function searchTokens(array $signals): Collection
+    {
+        return collect([
+            $signals['product_name'] ?? null,
+            $signals['brand'] ?? null,
+            $signals['extracted_text'] ?? null,
+        ])->filter()
+            ->flatMap(function (string $value) {
+                preg_match_all('/[a-z0-9]{3,}/i', strtolower($value), $matches);
+
+                return $matches[0] ?? [];
+            })
+            ->reject(fn ($token) => in_array($token, ['the', 'and', 'with', 'for', 'from', 'ingredients', 'nutrition', 'facts'], true))
+            ->unique()
+            ->take(10)
+            ->values();
+    }
+
+    protected function aliasMatchScore(Product $product, array $signals): float
+    {
+        $normalizedProductName = $signals['normalized_product_name'] ?? '';
+        $normalizedBrand = $signals['normalized_brand'] ?? '';
+        $normalizedText = $signals['normalized_extracted_text'] ?? '';
+        $productName = $this->normalizeText($product->name);
+        $productBrand = $this->normalizeText($product->brand);
+        $score = 0.0;
+
+        if ($normalizedProductName !== '' && $productName !== '') {
+            if ($productName === $normalizedProductName) {
+                $score += 0.45;
+            } elseif (str_contains($productName, $normalizedProductName) || str_contains($normalizedProductName, $productName)) {
+                $score += 0.25;
+            }
+        }
+
+        if ($normalizedBrand !== '' && $productBrand !== '') {
+            if ($productBrand === $normalizedBrand) {
+                $score += 0.2;
+            } elseif (str_contains($productBrand, $normalizedBrand) || str_contains($normalizedBrand, $productBrand)) {
+                $score += 0.1;
+            }
+        }
+
+        foreach ($this->catalogAliases($product) as $alias) {
+            $normalizedAlias = $this->normalizeText($alias);
+
+            if ($normalizedAlias === '') {
+                continue;
+            }
+
+            if ($normalizedText !== '' && str_contains($normalizedText, $normalizedAlias)) {
+                $score += str_word_count($normalizedAlias) >= 2 ? 0.18 : 0.08;
+            }
+
+            if ($normalizedProductName !== '' && ($normalizedAlias === $normalizedProductName || str_contains($normalizedAlias, $normalizedProductName))) {
+                $score += 0.12;
+            }
+        }
+
+        return min(1.0, $score);
+    }
+
+    protected function catalogAliases(Product $product): array
+    {
+        $rawAliases = collect([
+            $product->name,
+            $product->brand,
+            data_get($product->manual_overrides, 'name'),
+            data_get($product->manual_overrides, 'brand'),
+            data_get($product->raw_data, 'product_name'),
+            data_get($product->raw_data, 'generic_name'),
+            data_get($product->raw_data, 'abbreviated_product_name'),
+            data_get($product->raw_data, 'brands'),
+            data_get($product->raw_data, 'brand'),
+            data_get($product->raw_data, 'brand_owner'),
+            data_get($product->raw_data, 'product_title'),
+        ]);
+
+        $listAliases = collect([
+            data_get($product->raw_data, 'aliases', []),
+            data_get($product->raw_data, 'alternate_names', []),
+            data_get($product->manual_overrides, 'aliases', []),
+        ])->flatten(1);
+
+        return $rawAliases
+            ->merge($listAliases)
+            ->merge($product->barcodes->pluck('barcode'))
+            ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+            ->map(fn ($value) => trim($value))
+            ->unique()
+            ->values()
+            ->all();
     }
 }

@@ -12,9 +12,9 @@ The image scan API lets the app:
 
 The backend tries identification in this order:
 
-1. barcode extracted from the image
-2. barcode hint sent by the app
-3. OCR text and product label matching
+1. exact barcode match from app hint or OCR
+2. normalized `brand + product_name` match against the local catalog
+3. broader OCR text match against known catalog aliases
 
 If a product is identified, the backend returns the same scan result structure already used for barcode scanning.
 
@@ -60,6 +60,8 @@ Optional:
 - `extracted_text`: raw OCR text from the label
 - `latitude`: optional scan latitude
 - `longitude`: optional scan longitude
+
+The backend now performs OCR itself with Google Cloud Vision `DOCUMENT_TEXT_DETECTION`, so the optional app-side hints are best treated as helpful overrides rather than a requirement.
 
 ## Sample Request
 
@@ -118,7 +120,7 @@ Sample response:
         "product_family": "food",
         "confidence": 91,
         "matched_by": "image_barcode",
-        "analysis_source": "openai_vision",
+        "analysis_source": "google_cloud_vision",
         "provider_lookup": {
           "attempts": [],
           "attempted_provider_keys": [],
@@ -134,17 +136,37 @@ Sample response:
             "mime_type": "image/jpeg",
             "size": 248193
           },
+          "ocr": {
+            "extracted_text": "Kirkland Purified Water 12345678",
+            "product_name": "Purified Water",
+            "brand": "Kirkland",
+            "barcode_hint": "12345678",
+            "confidence": 0.91,
+            "provider": "google_cloud_vision",
+            "mode": "DOCUMENT_TEXT_DETECTION"
+          },
           "signals": {
             "barcode": "12345678",
+            "barcode_source": "ocr_barcode_hint",
             "product_name": "Kirkland Purified Water",
+            "normalized_product_name": "kirkland purified water",
             "brand": "Kirkland",
+            "normalized_brand": "kirkland",
             "extracted_text": "Kirkland Purified Water 12345678",
-            "category_hint": "food",
-            "confidence": 91,
-            "front_label_visible": true,
-            "barcode_visible": true,
-            "nutrition_panel_visible": false,
-            "ingredients_visible": false
+            "normalized_extracted_text": "kirkland purified water 12345678",
+            "confidence": 0.91,
+            "analysis_source": "google_cloud_vision",
+            "ocr_provider": "google_cloud_vision",
+            "ocr_mode": "DOCUMENT_TEXT_DETECTION",
+            "ocr_output": {
+              "extracted_text": "Kirkland Purified Water 12345678",
+              "product_name": "Purified Water",
+              "brand": "Kirkland",
+              "barcode_hint": "12345678",
+              "confidence": 0.91,
+              "provider": "google_cloud_vision",
+              "mode": "DOCUMENT_TEXT_DETECTION"
+            }
           }
         }
       },
@@ -235,7 +257,7 @@ If the backend cannot confidently identify the product from the image:
 ```json
 {
   "success": false,
-  "message": "We could not confidently identify this product from the uploaded image. Include a barcode hint or OCR text for now.",
+  "message": "We could not confidently identify this product from the uploaded image.",
   "data": {
     "scan": {
       "id": "a9c3c4d2-5f87-4fc8-8d35-0f95db7d2abc",
@@ -284,14 +306,13 @@ The backend may identify the product using:
 
 - `image_barcode`
 - `image_barcode_hint`
-- `image_text_match`
+- `image_brand_product_match`
+- `image_alias_text_match`
 
 The `analysis_source` field may show values such as:
 
-- `openai_vision`
-- `barcode_hint`
-- `openai_vision_local_catalog_match`
-- `local_catalog_text_match`
+- `google_cloud_vision`
+- `client_hints`
 
 ## Failure Handling Recommendation
 
