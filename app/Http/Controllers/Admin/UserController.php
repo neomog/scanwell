@@ -15,6 +15,7 @@ use App\Services\SubscriptionEventService;
 use App\Services\SubscriptionManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\Rule;
 use Throwable;
 
@@ -271,17 +272,20 @@ class UserController extends Controller
         return back()->with('success', 'User verified');
     }
 
-    // Reset password (admin action)
+    // Send password reset link (admin action)
     public function resetPassword(User $user)
     {
         abort_unless(request()->user()->can('users.manage'), 403);
 
-        $newPassword = 'password123';
+        $status = Password::sendResetLink([
+            'email' => $user->email,
+        ]);
 
-        $user->password = Hash::make($newPassword);
-        $user->save();
+        if ($status !== Password::RESET_LINK_SENT) {
+            return back()->with('error', __($status));
+        }
 
-        return back()->with('success', 'Password reset to: '.$newPassword);
+        return back()->with('success', 'Password reset link sent to '.$user->email.'.');
     }
 
     public function toggleRole(User $user)

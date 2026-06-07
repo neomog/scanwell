@@ -128,7 +128,7 @@
 
                         <form method="POST" action="{{ route('admin.users.reset-password', $user) }}">
                             @csrf
-                            <button type="submit" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition">Reset Password</button>
+                            <button type="submit" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition">Send Reset Link</button>
                         </form>
                     </div>
                 </div>
