@@ -242,6 +242,35 @@ class BillingController extends Controller
         }
     }
 
+    public function customerPortal(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'return_url' => ['nullable', 'string', 'max:500', fn (string $attribute, mixed $value, \Closure $fail) => $this->validateCheckoutRedirectUrl($attribute, $value, $fail)],
+        ]);
+
+        $subscription = $this->subscriptionManager
+            ->currentSubscription($request->user())
+            ->loadMissing(['plan', 'price']);
+
+        if ($subscription->provider !== 'stripe') {
+            return $this->error('Billing portal is only available for Stripe-managed subscriptions.', null, 422);
+        }
+
+        try {
+            $session = $this->stripeSubscriptionService->createBillingPortalSession(
+                $request->user(),
+                $validated['return_url'] ?? null
+            );
+
+            return $this->success([
+                'flow' => 'external_portal',
+                'portal_url' => $session->url,
+            ], 'Billing portal session created');
+        } catch (Throwable $exception) {
+            return $this->error($exception->getMessage(), null, 422);
+        }
+    }
+
     protected function transformPlan(SubscriptionPlan $plan): array
     {
         return [

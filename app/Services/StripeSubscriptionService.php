@@ -7,6 +7,7 @@ use App\Models\SubscriptionPlan;
 use App\Models\SubscriptionPrice;
 use App\Models\User;
 use RuntimeException;
+use Stripe\BillingPortal\Session as BillingPortalSession;
 use Stripe\Checkout\Session;
 use Stripe\Event;
 use Stripe\Exception\ApiErrorException;
@@ -118,6 +119,19 @@ class StripeSubscriptionService
                 'price_id' => (string) $price->id,
             ],
             'subscription_data' => $subscriptionData,
+        ]);
+    }
+
+    /**
+     * @throws ApiErrorException
+     */
+    public function createBillingPortalSession(User $user, ?string $returnUrl = null): BillingPortalSession
+    {
+        $customerId = $this->ensureCustomer($user);
+
+        return $this->client()->billingPortal->sessions->create([
+            'customer' => $customerId,
+            'return_url' => $returnUrl ?: config('subscriptions.stripe.portal_return_url'),
         ]);
     }
 

@@ -65,6 +65,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('/billing/failed-payments', [ApiBillingController::class, 'failedPayments']);
     Route::post('/billing/checkout', [ApiBillingController::class, 'checkout']);
     Route::post('/billing/cancel', [ApiBillingController::class, 'cancel']);
+    Route::post('/billing/customer-portal', [ApiBillingController::class, 'customerPortal']);
 
     // Scan routes
     Route::post('/scan', [ScanController::class, 'scan']);

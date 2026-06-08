@@ -186,5 +186,6 @@ return [
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
         'success_url' => env('STRIPE_CHECKOUT_SUCCESS_URL', rtrim((string) env('APP_URL', 'http://localhost'), '/').'/billing?checkout=success'),
         'cancel_url' => env('STRIPE_CHECKOUT_CANCEL_URL', rtrim((string) env('APP_URL', 'http://localhost'), '/').'/billing?checkout=cancelled'),
+        'portal_return_url' => env('STRIPE_BILLING_PORTAL_RETURN_URL', rtrim((string) env('APP_URL', 'http://localhost'), '/').'/billing'),
     ],
 ];
