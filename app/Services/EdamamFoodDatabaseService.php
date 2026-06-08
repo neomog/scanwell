@@ -79,39 +79,44 @@ class EdamamFoodDatabaseService implements ProductCatalogProvider
                 continue;
             }
 
-            $candidateBarcode = (string) data_get($hint, 'food.foodIdProperties.upc', data_get($hint, 'food.upc', ''));
+            $candidateBarcode = $this->extractBarcode($hint);
 
-            if ($candidateBarcode === $barcode) {
+            if ($candidateBarcode !== null && $candidateBarcode === $this->normalizeBarcode($barcode)) {
                 return $hint;
             }
         }
 
-        $parsed = $payload['parsed'] ?? [];
-
-        return is_array($parsed[0] ?? null) ? $parsed[0] : null;
+        return null;
     }
 
     protected function transformProduct(string $barcode, array $hint, array $payload): array
     {
         $food = $hint['food'] ?? [];
         $measures = $hint['measures'] ?? [];
+        $ingredients = $this->extractIngredients($food);
+        $nutrition = $this->extractNutrition($food);
+        $warnings = $this->extractWarnings($food);
+
+        if ($ingredients === [] && $nutrition === []) {
+            $warnings[] = 'Vendor returned very limited product details.';
+        }
 
         return [
             'barcode' => $barcode,
             'name' => $food['label'] ?? 'Unknown Product',
-            'brand' => $food['brand'] ?? null,
+            'brand' => $food['brand'] ?? $food['brandOwner'] ?? null,
             'category_id' => null,
             'image_url' => $food['image'] ?? null,
             'source' => 'edamam',
             'product_type' => 'food',
-            'ingredients' => $this->extractIngredients($food),
-            'nutrition' => $this->extractNutrition($food),
+            'ingredients' => $ingredients,
+            'nutrition' => $nutrition,
             'packaging' => [
                 'description' => null,
                 'materials' => [],
                 'is_plastic' => false,
             ],
-            'warnings' => $this->extractWarnings($food),
+            'warnings' => array_values(array_unique($warnings)),
             'raw_data' => [
                 'hint' => $hint,
                 'parsed' => $payload['parsed'] ?? [],
@@ -144,16 +149,25 @@ class EdamamFoodDatabaseService implements ProductCatalogProvider
     protected function extractNutrition(array $food): array
     {
         $nutrients = $food['nutrients'] ?? [];
+        $servingSize = $this->extractServingSize($food);
 
         return array_filter([
             'calories' => $nutrients['ENERC_KCAL'] ?? null,
             'fat' => $nutrients['FAT'] ?? null,
             'saturated_fat' => $nutrients['FASAT'] ?? null,
+            'trans_fat' => $nutrients['FATRN'] ?? null,
+            'cholesterol' => $nutrients['CHOLE'] ?? null,
             'carbohydrates' => $nutrients['CHOCDF'] ?? null,
             'fiber' => $nutrients['FIBTG'] ?? null,
             'sugars' => $nutrients['SUGAR'] ?? null,
+            'added_sugars' => $nutrients['SUGAR.added'] ?? null,
             'protein' => $nutrients['PROCNT'] ?? null,
             'sodium' => $nutrients['NA'] ?? null,
+            'vitamin_d' => $nutrients['VITD'] ?? null,
+            'calcium' => $nutrients['CA'] ?? null,
+            'iron' => $nutrients['FE'] ?? null,
+            'potassium' => $nutrients['K'] ?? null,
+            'serving_size' => $servingSize,
         ], fn ($value) => $value !== null && $value !== '');
     }
 
@@ -191,5 +205,51 @@ class EdamamFoodDatabaseService implements ProductCatalogProvider
             'retry_attempts' => (int) ($settings['retry_attempts'] ?? config('services.edamam.retry_attempts', 1)),
             'cache_ttl_minutes' => (int) ($settings['cache_ttl_minutes'] ?? 1440),
         ];
+    }
+
+    protected function extractBarcode(array $hint): ?string
+    {
+        foreach ([
+            data_get($hint, 'food.foodIdProperties.upc'),
+            data_get($hint, 'food.foodIdProperties.gtin_upc'),
+            data_get($hint, 'food.upc'),
+            data_get($hint, 'food.gtinUpc'),
+        ] as $candidate) {
+            $normalized = $this->normalizeBarcode($candidate);
+
+            if ($normalized !== null) {
+                return $normalized;
+            }
+        }
+
+        return null;
+    }
+
+    protected function normalizeBarcode(mixed $barcode): ?string
+    {
+        if ($barcode === null) {
+            return null;
+        }
+
+        $normalized = preg_replace('/\D+/', '', (string) $barcode);
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    protected function extractServingSize(array $food): ?string
+    {
+        foreach ([
+            data_get($food, 'servingSizes.0.label'),
+            data_get($food, 'servingSize'),
+            data_get($food, 'servingSizes.0.quantity'),
+        ] as $candidate) {
+            $value = is_scalar($candidate) ? trim((string) $candidate) : '';
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
     }
 }
