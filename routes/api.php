@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\BillingController as ApiBillingController;
+use App\Http\Controllers\Api\CommunityController as ApiCommunityController;
 use App\Http\Controllers\Api\ProfileController as ApiProfileController;
 use App\Http\Controllers\Api\Admin\NotificationController as ApiAdminNotificationController;
 use App\Http\Controllers\Api\Admin\SupportCaseController as ApiAdminSupportCaseController;
@@ -76,6 +77,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::put('/profile', [ApiProfileController::class, 'update']);
     Route::get('/preferences', [UserPreferenceController::class, 'show']);
     Route::put('/preferences', [UserPreferenceController::class, 'update']);
+    Route::get('/community/summary', [ApiCommunityController::class, 'summary']);
     Route::get('/recommendations', [UserPreferenceController::class, 'recommendations'])
         ->middleware('plan.feature:recommendations.enabled');
 
