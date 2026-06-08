@@ -182,12 +182,22 @@ class ProductContributionController extends Controller
         ]);
     }
 
-    public function userContributions(): JsonResponse
+    public function userContributions(Request $request): JsonResponse
     {
-        $contributions = ProductContribution::where('user_id', Auth::id())
+        $query = ProductContribution::where('user_id', Auth::id())
             ->with(['product.images', 'product.barcodes', 'reviewer'])
-            ->orderBy('created_at', 'desc')
-            ->paginate(20);
+            ->orderBy('created_at', 'desc');
+
+        if ($status = $request->get('status')) {
+            $query->where('status', $status);
+        }
+
+        if ($changeType = $request->get('change_type')) {
+            $query->where('change_type', $changeType);
+        }
+
+        $perPage = min(max((int) $request->get('limit', 20), 1), 50);
+        $contributions = $query->paginate($perPage);
 
         return response()->json([
             'success' => true,
