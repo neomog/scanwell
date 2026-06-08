@@ -19,6 +19,7 @@ use App\Services\SubscriptionManager;
 use Error;
 use Exception;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class ScanController extends Controller
@@ -233,12 +234,27 @@ class ScanController extends Controller
         ]);
     }
 
-    public function history(): JsonResponse
+    public function history(Request $request): JsonResponse
     {
-        $scans = Scan::with(['product', 'product.foodScore', 'product.cosmeticScore', 'product.images', 'product.barcodes'])
+        $baseQuery = Scan::query()->where('user_id', Auth::id());
+
+        $summary = [
+            'total' => (clone $baseQuery)->count(),
+            'completed' => (clone $baseQuery)->where('status', 'completed')->count(),
+            'failed' => (clone $baseQuery)->where('status', 'failed')->count(),
+            'pending' => (clone $baseQuery)->where('status', 'pending')->count(),
+        ];
+
+        $query = Scan::with(['product', 'product.foodScore', 'product.cosmeticScore', 'product.images', 'product.barcodes'])
             ->where('user_id', Auth::id())
-            ->orderBy('scan_timestamp', 'desc')
-            ->paginate(20);
+            ->orderBy('scan_timestamp', 'desc');
+
+        if ($status = $request->get('status')) {
+            $query->where('status', $status);
+        }
+
+        $perPage = min(max((int) $request->get('limit', 20), 1), 50);
+        $scans = $query->paginate($perPage);
 
         return response()->json([
             'success' => true,
@@ -248,6 +264,7 @@ class ScanController extends Controller
                 'per_page' => $scans->perPage(),
                 'current_page' => $scans->currentPage(),
                 'last_page' => $scans->lastPage(),
+                'summary' => $summary,
             ],
         ]);
     }
