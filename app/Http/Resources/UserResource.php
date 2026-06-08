@@ -30,6 +30,11 @@ class UserResource extends JsonResource
             'email_verified_at' => $this->email_verified_at,
             'avatar' => $this->avatar,
             'provider' => $this->provider,
+            'role' => $this->role,
+            'capabilities' => [
+                'can_review_submissions' => $this->hasPermission('submissions.view'),
+                'can_moderate_submissions' => $this->hasPermission('submissions.approve'),
+            ],
             'subscription' => [
                 'plan' => [
                     'id' => $currentSubscription->plan?->id,
