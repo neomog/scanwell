@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\BillingController as ApiBillingController;
+use App\Http\Controllers\Api\AccountController as ApiAccountController;
 use App\Http\Controllers\Api\CommunityController as ApiCommunityController;
 use App\Http\Controllers\Api\ProfileController as ApiProfileController;
 use App\Http\Controllers\Api\Admin\NotificationController as ApiAdminNotificationController;
@@ -66,6 +67,8 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('/billing/checkout', [ApiBillingController::class, 'checkout']);
     Route::post('/billing/cancel', [ApiBillingController::class, 'cancel']);
     Route::post('/billing/customer-portal', [ApiBillingController::class, 'customerPortal']);
+    Route::get('/account/export', [ApiAccountController::class, 'export']);
+    Route::delete('/account', [ApiAccountController::class, 'destroy']);
 
     // Scan routes
     Route::post('/scan', [ScanController::class, 'scan']);
