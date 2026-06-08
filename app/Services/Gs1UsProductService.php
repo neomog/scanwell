@@ -13,8 +13,9 @@ class Gs1UsProductService implements ProductCatalogProvider
 {
     protected bool $verifySsl;
 
-    public function __construct()
-    {
+    public function __construct(
+        protected ProductFamilyResolver $productFamilyResolver
+    ) {
         $this->verifySsl = App::environment('production');
     }
 
@@ -26,19 +27,20 @@ class Gs1UsProductService implements ProductCatalogProvider
     public function findByBarcode(string $barcode, array $settings = [], array $credentials = []): ?array
     {
         $resolved = $this->resolveSettings($settings, $credentials);
+        $normalizedBarcode = $this->normalizeBarcode($barcode);
 
-        if (blank($resolved['base_url']) || blank($resolved['api_key'])) {
+        if ($normalizedBarcode === null || blank($resolved['base_url']) || blank($resolved['api_key'])) {
             return null;
         }
 
-        $cacheKey = "scanwell:gs1us:{$barcode}";
+        $cacheKey = "scanwell:gs1us:{$normalizedBarcode}";
 
-        return Cache::remember($cacheKey, now()->addMinutes($resolved['cache_ttl_minutes']), function () use ($barcode, $resolved) {
+        return Cache::remember($cacheKey, now()->addMinutes($resolved['cache_ttl_minutes']), function () use ($barcode, $normalizedBarcode, $resolved) {
             try {
                 $request = $this->createHttpClient($resolved);
                 $response = $resolved['http_method'] === 'POST'
-                    ? $request->post($resolved['base_url'], [$resolved['barcode_field'] => $barcode])
-                    : $request->get($resolved['base_url'], [$resolved['barcode_field'] => $barcode]);
+                    ? $request->post($resolved['base_url'], [$resolved['barcode_field'] => $normalizedBarcode])
+                    : $request->get($resolved['base_url'], [$resolved['barcode_field'] => $normalizedBarcode]);
 
                 if (!$response->successful()) {
                     Log::warning('GS1 US lookup failed', [
@@ -57,17 +59,17 @@ class Gs1UsProductService implements ProductCatalogProvider
                     return null;
                 }
 
-                $resolvedBarcode = (string) data_get(
+                $resolvedBarcode = $this->normalizeBarcode(data_get(
                     $record,
                     $resolved['barcode_path'],
-                    data_get($record, 'gtin', data_get($record, 'GTIN', ''))
-                );
+                    data_get($record, 'gtin', data_get($record, 'GTIN', data_get($record, 'gln', '')))
+                ));
 
-                if ($resolvedBarcode !== $barcode) {
+                if ($resolvedBarcode === null || $resolvedBarcode !== $normalizedBarcode) {
                     return null;
                 }
 
-                return $this->transformProduct($record, $payload, $barcode);
+                return $this->transformProduct($record, $payload, $barcode, $normalizedBarcode);
             } catch (\Throwable $exception) {
                 Log::error('GS1 US integration failed', [
                     'barcode' => $barcode,
@@ -89,27 +91,43 @@ class Gs1UsProductService implements ProductCatalogProvider
             }
         }
 
+        foreach (['item', 'result', 'product'] as $field) {
+            $value = $payload[$field] ?? null;
+
+            if (is_array($value)) {
+                return $value;
+            }
+        }
+
         return is_array($payload) ? $payload : null;
     }
 
-    protected function transformProduct(array $record, array $payload, string $barcode): array
+    protected function transformProduct(array $record, array $payload, string $barcode, string $normalizedBarcode): array
     {
         $brand = data_get($record, 'brandName')
             ?? data_get($record, 'brand')
             ?? data_get($record, 'ownerName')
             ?? data_get($record, 'companyName');
+        $name = data_get($record, 'description')
+            ?? data_get($record, 'productDescription')
+            ?? data_get($record, 'productName')
+            ?? data_get($record, 'shortDescription')
+            ?? 'Unknown Product';
+        $imageUrl = data_get($record, 'imageUrl')
+            ?? data_get($record, 'image')
+            ?? data_get($record, 'primaryImageUrl');
+        $family = $this->inferProductType($record, $name, $brand);
+
+        $warnings = ['Provider returned identity-focused product metadata without ingredients or nutrition.'];
 
         return [
             'barcode' => $barcode,
-            'name' => data_get($record, 'description')
-                ?? data_get($record, 'productDescription')
-                ?? data_get($record, 'productName')
-                ?? 'Unknown Product',
+            'name' => $name,
             'brand' => is_string($brand) ? $brand : null,
             'category_id' => null,
-            'image_url' => data_get($record, 'imageUrl'),
+            'image_url' => is_string($imageUrl) ? $imageUrl : null,
             'source' => 'gs1_us',
-            'product_type' => 'general',
+            'product_type' => $family,
             'ingredients' => [],
             'nutrition' => [],
             'packaging' => [
@@ -117,8 +135,10 @@ class Gs1UsProductService implements ProductCatalogProvider
                 'materials' => [],
                 'is_plastic' => false,
             ],
-            'warnings' => [],
+            'warnings' => $warnings,
             'raw_data' => [
+                'gtin' => $normalizedBarcode,
+                'verified_identity' => true,
                 'record' => $record,
                 'payload' => $payload,
             ],
@@ -154,5 +174,37 @@ class Gs1UsProductService implements ProductCatalogProvider
             'retry_attempts' => (int) ($settings['retry_attempts'] ?? config('services.gs1_us.retry_attempts', 1)),
             'cache_ttl_minutes' => (int) ($settings['cache_ttl_minutes'] ?? 1440),
         ];
+    }
+
+    protected function normalizeBarcode(mixed $barcode): ?string
+    {
+        if ($barcode === null) {
+            return null;
+        }
+
+        $normalized = preg_replace('/\D+/', '', (string) $barcode);
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    protected function inferProductType(array $record, string $name, ?string $brand): string
+    {
+        $candidate = [
+            'name' => $name,
+            'brand' => $brand,
+            'raw_data' => [
+                'categories' => data_get($record, 'category')
+                    ?? data_get($record, 'categoryName')
+                    ?? data_get($record, 'segment')
+                    ?? data_get($record, 'productCategory'),
+                'categories_tags' => array_values(array_filter([
+                    data_get($record, 'categoryCode'),
+                    data_get($record, 'gpcCategoryCode'),
+                    data_get($record, 'gpcCategoryName'),
+                ])),
+            ],
+        ];
+
+        return $this->productFamilyResolver->resolveFromNormalized($candidate);
     }
 }
