@@ -70,7 +70,7 @@ class ScoreCalculationService
             'additive' => $additiveScore,
             'processing' => $processingScore,
             'nova_group' => data_get($product->raw_data, 'nova_group'),
-            'nutriscore_grade' => strtoupper((string) data_get($product->raw_data, 'nutriscore_grade')) ?: null,
+            'nutriscore_grade' => $this->normalizeNutriScoreGrade(data_get($product->raw_data, 'nutriscore_grade')),
             'score_breakdown' => $scoreBreakdown,
             'warnings' => array_values(array_unique($warnings)),
             'benefits' => array_values(array_unique($benefits)),
@@ -563,5 +563,18 @@ class ScoreCalculationService
         }
 
         return false;
+    }
+
+    protected function normalizeNutriScoreGrade(mixed $grade): ?string
+    {
+        $normalized = strtoupper(trim((string) $grade));
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        return in_array($normalized, ['A', 'B', 'C', 'D', 'E'], true)
+            ? $normalized
+            : null;
     }
 }
