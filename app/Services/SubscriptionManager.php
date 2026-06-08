@@ -117,7 +117,7 @@ class SubscriptionManager
                 'provider' => 'system',
                 'status' => Subscription::STATUS_ACTIVE,
                 'quantity' => 1,
-                'currency' => $price?->currency ?? config('subscriptions.currency', 'usd'),
+                'currency' => $this->normalizeCurrencyCode($price?->currency ?? config('subscriptions.currency', 'usd')),
                 'amount' => $price?->amount ?? 0,
                 'starts_at' => now(),
                 'current_period_starts_at' => now(),
@@ -277,7 +277,7 @@ class SubscriptionManager
                 'provider' => 'stripe',
                 'status' => $mappedStatus,
                 'quantity' => (int) ($stripeSubscription->items->data[0]->quantity ?? 1),
-                'currency' => strtolower((string) ($stripeSubscription->currency ?? $price->currency)),
+                'currency' => $this->normalizeCurrencyCode($stripeSubscription->currency ?? $price->currency),
                 'amount' => (int) ($stripeSubscription->items->data[0]->price->unit_amount ?? $price->amount),
                 'stripe_customer_id' => (string) $stripeSubscription->customer,
                 'stripe_subscription_id' => (string) $stripeSubscription->id,
@@ -379,5 +379,16 @@ class SubscriptionManager
             'scheduled_plan_change' => 'scheduled_plan_change_applied',
             default => data_get($attributes, 'provider') === 'system' ? 'subscription_assigned' : null,
         };
+    }
+
+    protected function normalizeCurrencyCode(mixed $currency): string
+    {
+        $normalized = strtolower(trim((string) $currency));
+
+        if (preg_match('/^[a-z]{3}$/', $normalized) === 1) {
+            return $normalized;
+        }
+
+        return 'usd';
     }
 }

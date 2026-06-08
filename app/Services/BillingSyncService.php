@@ -27,7 +27,7 @@ class BillingSyncService
             'provider' => 'stripe',
             'provider_payment_intent_id' => $invoice->payment_intent ?? $invoiceModel->provider_payment_intent_id,
             'provider_charge_id' => $invoice->charge ?? $invoiceModel->provider_charge_id,
-            'currency' => strtolower((string) ($invoice->currency ?? $invoiceModel->currency ?? 'usd')),
+            'currency' => $this->normalizeCurrencyCode($invoice->currency ?? $invoiceModel->currency ?? 'usd'),
             'subtotal' => (int) ($invoice->subtotal ?? $invoiceModel->subtotal ?? 0),
             'tax' => (int) ($invoice->tax ?? $invoiceModel->tax ?? 0),
             'total' => (int) ($invoice->total ?? $invoiceModel->total ?? 0),
@@ -91,7 +91,7 @@ class BillingSyncService
             'amount' => (int) ($status === 'failed'
                 ? ($stripeInvoice->amount_due ?? $stripeInvoice->total ?? 0)
                 : ($stripeInvoice->amount_paid ?? $stripeInvoice->total ?? 0)),
-            'currency' => strtolower((string) ($stripeInvoice->currency ?? $invoice->currency ?? 'usd')),
+            'currency' => $this->normalizeCurrencyCode($stripeInvoice->currency ?? $invoice->currency ?? 'usd'),
             'description' => $description ?? ($stripeInvoice->description ?? 'Subscription invoice payment'),
             'failure_code' => data_get($stripeInvoice, 'last_finalization_error.code')
                 ?? data_get($stripeInvoice, 'last_payment_error.code'),
@@ -141,7 +141,7 @@ class BillingSyncService
             'billing_transaction_id' => $transaction?->id,
             'provider' => 'stripe',
             'amount' => (int) ($refund->amount ?? 0),
-            'currency' => strtolower((string) ($refund->currency ?? $subscription->currency ?? 'usd')),
+            'currency' => $this->normalizeCurrencyCode($refund->currency ?? $subscription->currency ?? 'usd'),
             'reason' => $reason ?? $refund->reason ?? $refundModel->reason,
             'status' => $refund->status ?? $refundModel->status ?? 'pending',
             'requested_by_type' => $requestedByType ?? $refundModel->requested_by_type,
@@ -164,5 +164,16 @@ class BillingSyncService
         }
 
         return Carbon::createFromTimestamp((int) $timestamp);
+    }
+
+    protected function normalizeCurrencyCode(mixed $currency): string
+    {
+        $normalized = strtolower(trim((string) $currency));
+
+        if (preg_match('/^[a-z]{3}$/', $normalized) === 1) {
+            return $normalized;
+        }
+
+        return 'usd';
     }
 }
