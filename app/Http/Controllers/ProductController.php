@@ -8,6 +8,7 @@ use App\Http\Resources\ProductResource;
 use App\Models\Product;
 use App\Models\UserPreference;
 use App\Services\ProductAnalysisService;
+use App\Services\ProductAlternativeService;
 use App\Services\ProductContributionService;
 use App\Services\ProductPayloadService;
 use App\Services\ProductWorkflowService;
@@ -21,6 +22,7 @@ class ProductController extends Controller
 {
     public function __construct(
         protected ProductAnalysisService $analysisService,
+        protected ProductAlternativeService $productAlternativeService,
         protected ProductWorkflowService $productWorkflowService,
         protected ProductPayloadService $productPayloadService,
         protected ProductContributionService $productContributionService
@@ -162,33 +164,13 @@ class ProductController extends Controller
     {
         $product = Product::with(['foodScore', 'cosmeticScore', 'images', 'barcodes'])->findOrFail($id);
 
-        $alternatives = Product::with(['foodScore', 'cosmeticScore', 'ingredients', 'images', 'barcodes'])
-            ->where('category_id', $product->category_id)
-            ->where('id', '!=', $product->id)
-            ->where(function ($query) use ($product) {
-                if ($product->foodScore) {
-                    $query->whereHas('foodScore', function ($scoreQuery) use ($product) {
-                        $scoreQuery->where('overall_score', '>', $product->foodScore->overall_score);
-                    });
-                }
+        $alternatives = $this->productAlternativeService->findFor($product, 5);
 
-                if ($product->cosmeticScore) {
-                    $query->orWhereHas('cosmeticScore', function ($scoreQuery) use ($product) {
-                        $scoreQuery->where('overall_score', '>', $product->cosmeticScore->overall_score);
-                    });
-                }
-            })
-            ->limit(5)
-            ->get();
-
-        $alternativesWithComparison = $alternatives->map(function ($alternative) use ($product) {
-            $alternativeScore = $alternative->foodScore->overall_score ?? $alternative->cosmeticScore->overall_score ?? 0;
-            $productScore = $product->foodScore->overall_score ?? $product->cosmeticScore->overall_score ?? 0;
-
+        $alternativesWithComparison = $alternatives->map(function ($alternative) {
             return [
                 'product' => new ProductResource($alternative),
-                'score_improvement' => round($alternativeScore - $productScore, 2),
-                'reasons' => $this->generateAlternativeReasons($product, $alternative),
+                'score_improvement' => $alternative->alternative_score_improvement ?? 0,
+                'reasons' => $alternative->alternative_reasons ?? [],
             ];
         });
 

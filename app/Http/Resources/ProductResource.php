@@ -53,6 +53,10 @@ class ProductResource extends JsonResource
             'alternatives' => ProductResource::collection($this->whenLoaded('alternatives')),
             'score' => $this->score,
             'score_grade' => $this->score_grade,
+            'alternative_summary' => $this->when(isset($this->alternative_summary), $this->alternative_summary),
+            'alternative_reasons' => $this->when(isset($this->alternative_reasons), $this->alternative_reasons),
+            'score_improvement' => $this->when(isset($this->alternative_score_improvement), $this->alternative_score_improvement),
+            'alternative_match_score' => $this->when(isset($this->alternative_match_score), $this->alternative_match_score),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

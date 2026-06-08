@@ -13,6 +13,7 @@ use App\Models\Product;
 use App\Models\Scan;
 use App\Models\UserPreference;
 use App\Services\ProductAnalysisService;
+use App\Services\ProductAlternativeService;
 use App\Services\ProductImageAnalysisService;
 use App\Services\ProductContributionService;
 use App\Services\SubscriptionManager;
@@ -26,6 +27,7 @@ class ScanController extends Controller
 {
     public function __construct(
         protected ProductAnalysisService $analysisService,
+        protected ProductAlternativeService $productAlternativeService,
         protected ProductImageAnalysisService $productImageAnalysisService,
         protected ProductContributionService $productContributionService,
         protected SubscriptionManager $subscriptionManager
@@ -78,12 +80,7 @@ class ScanController extends Controller
                 }
             }
 
-            $alternatives = null;
-            $score = $product->foodScore->overall_score ?? $product->cosmeticScore->overall_score;
-
-            if ($score !== null && $score < 50) {
-                $alternatives = $this->findAlternatives($product);
-            }
+            $alternatives = $this->alternativesFor($product);
 
             return $this->successResponse($scan, $product, $personalizedWarnings, $alternatives);
         } catch (PlanFeatureException $e) {
@@ -287,22 +284,6 @@ class ScanController extends Controller
         ]);
     }
 
-    protected function findAlternatives(Product $product): ?object
-    {
-        return Product::with(['foodScore', 'cosmeticScore', 'images', 'barcodes'])
-            ->where('category_id', $product->category_id)
-            ->where('id', '!=', $product->id)
-            ->where(function ($query) {
-                $query->whereHas('foodScore', function ($scoreQuery) {
-                    $scoreQuery->where('overall_score', '>=', 70);
-                })->orWhereHas('cosmeticScore', function ($scoreQuery) {
-                    $scoreQuery->where('overall_score', '>=', 70);
-                });
-            })
-            ->limit(3)
-            ->get();
-    }
-
     protected function personalizedWarnings(Product $product): array
     {
         if (!Auth::check()) {
@@ -326,7 +307,7 @@ class ScanController extends Controller
             return null;
         }
 
-        return $this->findAlternatives($product);
+        return $this->productAlternativeService->findFor($product, 3);
     }
 
     protected function successResponse(Scan $scan, Product $product, array $personalizedWarnings, ?object $alternatives): JsonResponse
