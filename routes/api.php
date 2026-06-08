@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\BillingController as ApiBillingController;
+use App\Http\Controllers\Api\ProfileController as ApiProfileController;
 use App\Http\Controllers\Api\Admin\NotificationController as ApiAdminNotificationController;
 use App\Http\Controllers\Api\Admin\SupportCaseController as ApiAdminSupportCaseController;
 use App\Http\Controllers\Api\NotificationController as ApiNotificationController;
@@ -22,7 +23,7 @@ Route::post('/reset-password', [AuthController::class, 'resetPassword'])->middle
 Route::post('/stripe/webhook', StripeWebhookController::class)->name('api.stripe.webhook');
 
 // Protected routes
-Route::middleware('auth:sanctum', 'verified')->group(function () {
+Route::middleware('auth:sanctum')->group(function () {
     //    Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
     //        ->middleware('signed')
     //        ->name('verification.verify');
@@ -30,7 +31,6 @@ Route::middleware('auth:sanctum', 'verified')->group(function () {
 
     Route::get('/user', [AuthController::class, 'user']);
     Route::post('/logout', [AuthController::class, 'logout']);
-
 });
 
 // oauth routes
@@ -73,6 +73,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::delete('/scans/{id}', [ScanController::class, 'destroy']);
 
     // User preferences
+    Route::put('/profile', [ApiProfileController::class, 'update']);
     Route::get('/preferences', [UserPreferenceController::class, 'show']);
     Route::put('/preferences', [UserPreferenceController::class, 'update']);
     Route::get('/recommendations', [UserPreferenceController::class, 'recommendations'])
