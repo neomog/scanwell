@@ -102,6 +102,8 @@ class OpenFoodFactsService implements ProductCatalogImportProvider, ProductCatal
             $response = $this->createHttpClient($settings)->get("{$source['base_url']}/product/{$barcode}.json");
 
             if (!$response->successful()) {
+                $this->logUnsuccessfulLookup($source, $barcode, $response->status(), $response->json() ?? []);
+
                 return null;
             }
 
@@ -378,10 +380,61 @@ class OpenFoodFactsService implements ProductCatalogImportProvider, ProductCatal
     protected function resolveSettings(array $settings = []): array
     {
         return [
-            'sources' => $settings['sources'] ?? config('scanning.open_food_facts.sources', []),
+            'sources' => $this->normalizeSources($settings['sources'] ?? config('scanning.open_food_facts.sources', [])),
             'timeout' => (int) ($settings['timeout'] ?? config('scanning.open_food_facts.timeout', 10)),
             'retry_attempts' => (int) ($settings['retry_attempts'] ?? config('scanning.open_food_facts.retry_attempts', 3)),
             'cache_ttl_minutes' => (int) ($settings['cache_ttl_minutes'] ?? 60 * 24 * 7),
         ];
+    }
+
+    protected function normalizeSources(array $sources): array
+    {
+        return array_values(array_filter(array_map(function (array $source): ?array {
+            $baseUrl = trim((string) ($source['base_url'] ?? ''));
+
+            if ($baseUrl === '' || !$this->sourceEnabled($source)) {
+                return null;
+            }
+
+            return [
+                'key' => (string) ($source['key'] ?? 'open_facts'),
+                'base_url' => rtrim($baseUrl, '/'),
+                'family_hint' => (string) ($source['family_hint'] ?? 'general'),
+                'enabled' => true,
+            ];
+        }, $sources)));
+    }
+
+    protected function sourceEnabled(array $source): bool
+    {
+        if (!array_key_exists('enabled', $source)) {
+            return true;
+        }
+
+        return filter_var($source['enabled'], FILTER_VALIDATE_BOOL);
+    }
+
+    protected function logUnsuccessfulLookup(array $source, string $barcode, int $status, array $payload): void
+    {
+        $statusVerbose = strtolower((string) ($payload['status_verbose'] ?? ''));
+        $sourceKey = $source['key'] ?? 'unknown';
+
+        if ($status === 404 && str_contains($statusVerbose, 'different product type')) {
+            Log::info('Open Facts source skipped due to product family mismatch', [
+                'barcode' => $barcode,
+                'source' => $sourceKey,
+                'status' => $status,
+                'status_verbose' => $payload['status_verbose'] ?? null,
+            ]);
+
+            return;
+        }
+
+        Log::warning('Open Facts source lookup returned non-success status', [
+            'barcode' => $barcode,
+            'source' => $sourceKey,
+            'status' => $status,
+            'status_verbose' => $payload['status_verbose'] ?? null,
+        ]);
     }
 }

@@ -147,21 +147,25 @@ class ScanProviderController extends Controller
                         'key' => 'open_food_facts',
                         'base_url' => $validated['open_food_facts_base_url'] ?: 'https://world.openfoodfacts.org/api/v2',
                         'family_hint' => 'food',
+                        'enabled' => $this->sourceEnabled($scanProvider, 'open_food_facts', true),
                     ],
                     [
                         'key' => 'open_beauty_facts',
                         'base_url' => $validated['open_beauty_facts_base_url'] ?: 'https://world.openbeautyfacts.org/api/v2',
                         'family_hint' => 'cosmetic',
+                        'enabled' => $this->sourceEnabled($scanProvider, 'open_beauty_facts', true),
                     ],
                     [
                         'key' => 'open_product_facts',
                         'base_url' => $validated['open_product_facts_base_url'] ?: 'https://world.openproductfacts.org/api/v2',
                         'family_hint' => 'general',
+                        'enabled' => $this->sourceEnabled($scanProvider, 'open_product_facts', false),
                     ],
                     [
                         'key' => 'open_pet_food_facts',
                         'base_url' => $validated['open_pet_food_facts_base_url'] ?: 'https://world.openpetfoodfacts.org/api/v2',
                         'family_hint' => 'pet_food',
+                        'enabled' => $this->sourceEnabled($scanProvider, 'open_pet_food_facts', true),
                     ],
                 ];
                 break;
@@ -230,5 +234,17 @@ class ScanProviderController extends Controller
             ], fn ($value) => $value !== ''),
             default => [],
         };
+    }
+
+    protected function sourceEnabled(ScanProvider $scanProvider, string $sourceKey, bool $default): bool
+    {
+        $source = collect($scanProvider->settings['sources'] ?? [])
+            ->first(fn (array $item): bool => ($item['key'] ?? null) === $sourceKey);
+
+        if (!is_array($source) || !array_key_exists('enabled', $source)) {
+            return $default;
+        }
+
+        return filter_var($source['enabled'], FILTER_VALIDATE_BOOL);
     }
 }
