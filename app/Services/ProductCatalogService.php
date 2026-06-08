@@ -155,6 +155,10 @@ class ProductCatalogService
         $completeness = $this->calculateCompleteness($candidate);
         $warnings = $candidate['warnings'] ?? [];
 
+        if (!$this->meetsMinimumDataRequirements($candidate, $family, $completeness)) {
+            return null;
+        }
+
         if ($completeness < 35) {
             $warnings[] = 'Limited vendor data was returned for this barcode.';
         }
@@ -207,16 +211,19 @@ class ProductCatalogService
     protected function calculateConfidence(array $candidate, int $completeness): int
     {
         $confidence = 55;
+        $hasIngredients = !empty($candidate['ingredients']);
+        $hasNutrition = $this->hasNutritionData($candidate);
+        $name = trim((string) ($candidate['name'] ?? ''));
 
         if (!empty($candidate['image_url'])) {
             $confidence += 5;
         }
 
-        if (!empty($candidate['ingredients'])) {
+        if ($hasIngredients) {
             $confidence += 5;
         }
 
-        if ($this->hasNutritionData($candidate)) {
+        if ($hasNutrition) {
             $confidence += 5;
         }
 
@@ -226,7 +233,15 @@ class ProductCatalogService
 
         $confidence += (int) round($completeness / 4);
 
-        return min(100, $confidence);
+        if (!$hasIngredients && !$hasNutrition) {
+            $confidence -= 25;
+        }
+
+        if ($name === '' || $name === 'Unknown Product') {
+            $confidence -= 15;
+        }
+
+        return max(0, min(100, $confidence));
     }
 
     protected function hasNutritionData(array $candidate): bool
@@ -250,30 +265,54 @@ class ProductCatalogService
     protected function activeProviders(?string $productFamily = null): Collection
     {
         if (!class_exists(ScanProvider::class) || !\Illuminate\Support\Facades\Schema::hasTable('scan_providers')) {
-            return collect(config('scanning.providers', []))
-                ->map(fn (string $driverClass, int $index) => new ScanProvider([
-                    'name' => class_basename($driverClass),
-                    'provider_key' => app($driverClass)->providerKey(),
-                    'driver' => $driverClass,
-                    'is_active' => true,
-                    'priority' => ($index + 1) * 10,
-                    'supported_families' => [],
-                    'settings' => [],
-                    'credentials' => [],
-                    'timeout_seconds' => 10,
-                    'retry_attempts' => 3,
-                    'cache_ttl_minutes' => 10080,
-                    'health_status' => 'unknown',
-                ]));
+            return $this->configuredProviders();
         }
 
-        return ScanProvider::query()
+        $providers = ScanProvider::query()
             ->where('is_active', true)
             ->orderBy('priority')
             ->orderBy('name')
             ->get()
             ->filter(fn (ScanProvider $provider): bool => $provider->supportsFamily($productFamily))
             ->values();
+
+        return $providers->isNotEmpty() ? $providers : $this->configuredProviders($productFamily);
+    }
+
+    protected function configuredProviders(?string $productFamily = null): Collection
+    {
+        return collect(config('scanning.providers', []))
+            ->map(fn (string $driverClass, int $index) => new ScanProvider([
+                'name' => class_basename($driverClass),
+                'provider_key' => app($driverClass)->providerKey(),
+                'driver' => $driverClass,
+                'is_active' => true,
+                'priority' => ($index + 1) * 10,
+                'supported_families' => [],
+                'settings' => [],
+                'credentials' => [],
+                'timeout_seconds' => 10,
+                'retry_attempts' => 3,
+                'cache_ttl_minutes' => 10080,
+                'health_status' => 'unknown',
+            ]))
+            ->filter(fn (ScanProvider $provider): bool => $provider->supportsFamily($productFamily))
+            ->values();
+    }
+
+    protected function meetsMinimumDataRequirements(array $candidate, string $family, int $completeness): bool
+    {
+        $hasIngredients = !empty($candidate['ingredients']);
+        $hasNutrition = $this->hasNutritionData($candidate);
+        $hasName = filled($candidate['name'] ?? null) && ($candidate['name'] ?? null) !== 'Unknown Product';
+        $hasBrand = filled($candidate['brand'] ?? null);
+        $hasImage = filled($candidate['image_url'] ?? null);
+
+        return match ($family) {
+            ProductFamilyResolver::FOOD, ProductFamilyResolver::PET_FOOD => $hasIngredients || $hasNutrition,
+            ProductFamilyResolver::COSMETIC, ProductFamilyResolver::HOUSEHOLD => $hasIngredients || $completeness >= 45,
+            default => $hasName && ($hasBrand || $hasImage),
+        };
     }
 
     protected function resolveDriver(ScanProvider $providerRecord): ?ProductCatalogProvider
