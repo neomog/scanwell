@@ -38,6 +38,15 @@ class ScanProviderController extends Controller
         return view('admin.scanning.index', compact('providers', 'recentLookups', 'overview'));
     }
 
+    public function directory(ScanProviderImportService $importService): View
+    {
+        $providers = $this->providerQuery()->get();
+
+        $this->hydrateProviders($providers, $importService);
+
+        return view('admin.scanning.directory', compact('providers'));
+    }
+
     public function edit(ScanProvider $scanProvider, ScanProviderImportService $importService): View
     {
         $scanProvider->loadCount([

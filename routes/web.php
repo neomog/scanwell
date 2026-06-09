@@ -58,6 +58,7 @@ Route::middleware(['auth', AdminMiddleware::class])
         Route::get('/notifications/{notification}', [AdminNotificationController::class, 'show'])->middleware('can:notifications.view')->name('notifications.show');
         Route::post('/notifications/{notification}/send', [AdminNotificationController::class, 'send'])->middleware('can:notifications.manage')->name('notifications.send');
         Route::get('/scanning/providers', [ScanProviderController::class, 'index'])->middleware('can:scanning.manage')->name('scanning.providers.index');
+        Route::get('/scanning/providers/directory', [ScanProviderController::class, 'directory'])->middleware('can:scanning.manage')->name('scanning.providers.directory');
         Route::get('/scanning/providers/{scanProvider}', [ScanProviderController::class, 'edit'])->middleware('can:scanning.manage')->name('scanning.providers.edit');
         Route::post('/scanning/providers/{scanProvider}', [ScanProviderController::class, 'update'])->middleware('can:scanning.manage')->name('scanning.providers.update');
         Route::post('/scanning/providers/{scanProvider}/toggle-active', [ScanProviderController::class, 'toggleActive'])->middleware('can:scanning.manage')->name('scanning.providers.toggle-active');
