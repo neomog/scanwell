@@ -3,7 +3,7 @@
     class="bg-white border-r border-gray-200 h-screen fixed transition-all duration-300"
 >
     <div class="flex items-center justify-between p-4">
-        <span x-show="sidebarOpen" class="text-lg font-bold">LiveWise</span>
+        <span x-show="sidebarOpen" class="text-lg font-bold">LabelWise</span>
 
         <button @click="sidebarOpen = !sidebarOpen" class="p-2 rounded hover:bg-gray-100">
             <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
