@@ -92,6 +92,9 @@ class ProductCatalogService
                         'brand' => $normalized['brand'] ?? null,
                         'source' => $normalized['source'] ?? null,
                         'product_family' => $normalized['product_type'] ?? null,
+                        'completeness' => $normalized['completeness'] ?? null,
+                        'has_ingredients' => !empty($normalized['ingredients']),
+                        'has_nutrition' => $this->hasNutritionData($normalized),
                         'warnings' => $normalized['warnings'] ?? [],
                     ]
                 );

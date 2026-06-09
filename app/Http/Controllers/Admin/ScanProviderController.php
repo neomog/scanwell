@@ -32,6 +32,7 @@ class ScanProviderController extends Controller
         $providers->each(function (ScanProvider $provider) use ($importService): void {
             $provider->setAttribute('supports_import', $importService->supportsImport($provider));
             $provider->setAttribute('import_config_summary', $importService->importConfigSummary($provider));
+            $provider->setAttribute('quality_metrics', $this->buildQualityMetrics($provider));
         });
 
         $recentLookups = ScanProviderLookup::query()
@@ -234,6 +235,52 @@ class ScanProviderController extends Controller
             ], fn ($value) => $value !== ''),
             default => [],
         };
+    }
+
+    protected function buildQualityMetrics(ScanProvider $provider): array
+    {
+        $lookups = $provider->lookups()
+            ->where('created_at', '>=', now()->subDays(7))
+            ->get();
+
+        $attempts = $lookups->count();
+        $successful = $lookups->where('status', 'success');
+        $successCount = $successful->count();
+        $matchedCount = $lookups->where('matched', true)->count();
+        $errorCount = $lookups->where('status', 'error')->count();
+        $latencies = $lookups->pluck('latency_ms')->filter(fn ($value) => $value !== null)->sort()->values();
+
+        $ingredientCoverage = $successful
+            ->filter(fn (ScanProviderLookup $lookup): bool => (bool) data_get($lookup->response_summary, 'has_ingredients', false))
+            ->count();
+        $nutritionCoverage = $successful
+            ->filter(fn (ScanProviderLookup $lookup): bool => (bool) data_get($lookup->response_summary, 'has_nutrition', false))
+            ->count();
+        $averageConfidence = $successful
+            ->pluck('confidence')
+            ->filter(fn ($value) => $value !== null)
+            ->avg();
+        $averageCompleteness = $successful
+            ->map(fn (ScanProviderLookup $lookup) => data_get($lookup->response_summary, 'completeness'))
+            ->filter(fn ($value) => $value !== null)
+            ->avg();
+
+        return [
+            'attempts' => $attempts,
+            'success_rate' => $attempts > 0 ? round(($successCount / $attempts) * 100) : null,
+            'match_rate' => $attempts > 0 ? round(($matchedCount / $attempts) * 100) : null,
+            'error_rate' => $attempts > 0 ? round(($errorCount / $attempts) * 100) : null,
+            'ingredient_coverage' => $successCount > 0 ? round(($ingredientCoverage / $successCount) * 100) : null,
+            'nutrition_coverage' => $successCount > 0 ? round(($nutritionCoverage / $successCount) * 100) : null,
+            'median_latency_ms' => $latencies->isNotEmpty() ? $latencies[(int) floor(($latencies->count() - 1) / 2)] : null,
+            'average_confidence' => $averageConfidence !== null ? round($averageConfidence) : null,
+            'average_completeness' => $averageCompleteness !== null ? round($averageCompleteness) : null,
+            'family_breakdown' => $lookups
+                ->groupBy(fn (ScanProviderLookup $lookup): string => $lookup->product_family ?: 'unknown')
+                ->map(fn ($group) => $group->count())
+                ->sortDesc()
+                ->all(),
+        ];
     }
 
     protected function sourceEnabled(ScanProvider $scanProvider, string $sourceKey, bool $default): bool

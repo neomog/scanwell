@@ -42,6 +42,61 @@
                             </div>
                         </div>
 
+                        <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+                            <div>
+                                <h4 class="text-sm font-semibold text-slate-900">7-Day Quality Snapshot</h4>
+                                <p class="mt-1 text-xs text-slate-500">Use this to compare launch-readiness across providers.</p>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3 text-sm">
+                                <div class="rounded-lg bg-slate-50 p-3">
+                                    <div class="text-slate-500">Success Rate</div>
+                                    <div class="font-semibold text-slate-900">{{ $provider->quality_metrics['success_rate'] !== null ? $provider->quality_metrics['success_rate'] . '%' : 'N/A' }}</div>
+                                </div>
+                                <div class="rounded-lg bg-slate-50 p-3">
+                                    <div class="text-slate-500">Match Rate</div>
+                                    <div class="font-semibold text-slate-900">{{ $provider->quality_metrics['match_rate'] !== null ? $provider->quality_metrics['match_rate'] . '%' : 'N/A' }}</div>
+                                </div>
+                                <div class="rounded-lg bg-slate-50 p-3">
+                                    <div class="text-slate-500">Error Rate</div>
+                                    <div class="font-semibold text-slate-900">{{ $provider->quality_metrics['error_rate'] !== null ? $provider->quality_metrics['error_rate'] . '%' : 'N/A' }}</div>
+                                </div>
+                                <div class="rounded-lg bg-slate-50 p-3">
+                                    <div class="text-slate-500">Median Latency</div>
+                                    <div class="font-semibold text-slate-900">{{ $provider->quality_metrics['median_latency_ms'] !== null ? $provider->quality_metrics['median_latency_ms'] . ' ms' : 'N/A' }}</div>
+                                </div>
+                                <div class="rounded-lg bg-slate-50 p-3">
+                                    <div class="text-slate-500">Ingredient Coverage</div>
+                                    <div class="font-semibold text-slate-900">{{ $provider->quality_metrics['ingredient_coverage'] !== null ? $provider->quality_metrics['ingredient_coverage'] . '%' : 'N/A' }}</div>
+                                </div>
+                                <div class="rounded-lg bg-slate-50 p-3">
+                                    <div class="text-slate-500">Nutrition Coverage</div>
+                                    <div class="font-semibold text-slate-900">{{ $provider->quality_metrics['nutrition_coverage'] !== null ? $provider->quality_metrics['nutrition_coverage'] . '%' : 'N/A' }}</div>
+                                </div>
+                                <div class="rounded-lg bg-slate-50 p-3">
+                                    <div class="text-slate-500">Avg Confidence</div>
+                                    <div class="font-semibold text-slate-900">{{ $provider->quality_metrics['average_confidence'] !== null ? $provider->quality_metrics['average_confidence'] : 'N/A' }}</div>
+                                </div>
+                                <div class="rounded-lg bg-slate-50 p-3">
+                                    <div class="text-slate-500">Avg Completeness</div>
+                                    <div class="font-semibold text-slate-900">{{ $provider->quality_metrics['average_completeness'] !== null ? $provider->quality_metrics['average_completeness'] : 'N/A' }}</div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Recent Family Mix</div>
+                                <div class="mt-2 flex flex-wrap gap-2">
+                                    @forelse($provider->quality_metrics['family_breakdown'] as $family => $count)
+                                        <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                                            {{ str_replace('_', ' ', ucfirst($family)) }}: {{ $count }}
+                                        </span>
+                                    @empty
+                                        <span class="text-xs text-slate-500">No recent provider attempts yet.</span>
+                                    @endforelse
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-sm">
                             <div class="flex items-center justify-between gap-3">
                                 <div>
