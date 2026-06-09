@@ -255,23 +255,6 @@
                                         <input type="url" name="open_pet_food_facts_base_url" value="{{ old('open_pet_food_facts_base_url', data_get($provider->settings, 'sources.3.base_url', 'https://world.openpetfoodfacts.org/api/v2')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
                                     </div>
                                 </div>
-                            @elseif($provider->provider_key === 'barcode_lookup')
-                                <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
-                                    <div>
-                                        <h4 class="text-sm font-semibold text-slate-900">Provider Settings</h4>
-                                        <p class="mt-1 text-xs text-slate-600">Configure the Barcode Lookup endpoint and API key.</p>
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
-                                        <input type="url" name="barcode_lookup_base_url" value="{{ old('barcode_lookup_base_url', data_get($provider->settings, 'base_url', 'https://api.barcodelookup.com/v3/products')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                                        <input type="text" name="barcode_lookup_api_key" value="{{ old('barcode_lookup_api_key', data_get($provider->credentials, 'api_key')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
-                                    </div>
-                                </div>
                             @elseif($provider->provider_key === 'edamam')
                                 <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
                                     <div>

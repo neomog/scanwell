@@ -9,11 +9,6 @@ This document complements the multi-provider scan engine and the super-admin pro
   - Type: free
   - Covers: `food`, `cosmetic`, `pet_food`, `household`, `general`
 
-- `barcode_lookup`
-  - Driver: `App\Services\BarcodeLookupService`
-  - Type: paid
-  - Covers: `food`, `cosmetic`, `pet_food`, `household`, `general`
-
 - `edamam`
   - Driver: `App\Services\EdamamFoodDatabaseService`
   - Type: paid
@@ -39,14 +34,6 @@ For each provider you can:
 - run a provider-specific `Sync Products` action when the driver supports imports
 
 ## Credentials JSON examples
-
-### Barcode Lookup
-
-```json
-{
-  "api_key": "your_barcode_lookup_api_key"
-}
-```
 
 ## One-click provider imports
 
@@ -93,14 +80,6 @@ Notes:
 
 ## Settings JSON examples
 
-### Barcode Lookup
-
-```json
-{
-  "base_url": "https://api.barcodelookup.com/v3/products"
-}
-```
-
 ### Edamam
 
 ```json
@@ -131,7 +110,6 @@ Suggested production order:
 1. `gs1_us`
 2. `open_facts`
 3. `edamam`
-4. `barcode_lookup`
 
 That order gives you:
 

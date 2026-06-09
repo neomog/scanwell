@@ -64,13 +64,6 @@ return [
         'retry_attempts' => env('OPENFOODFACTS_RETRY_ATTEMPTS', 3),
     ],
 
-    'barcode_lookup' => [
-        'base_url' => env('BARCODE_LOOKUP_BASE_URL', 'https://api.barcodelookup.com/v3/products'),
-        'api_key' => env('BARCODE_LOOKUP_API_KEY'),
-        'timeout' => env('BARCODE_LOOKUP_TIMEOUT', 10),
-        'retry_attempts' => env('BARCODE_LOOKUP_RETRY_ATTEMPTS', 1),
-    ],
-
     'edamam' => [
         'base_url' => env('EDAMAM_BASE_URL', 'https://api.edamam.com/api/food-database/v2/parser'),
         'app_id' => env('EDAMAM_APP_ID'),

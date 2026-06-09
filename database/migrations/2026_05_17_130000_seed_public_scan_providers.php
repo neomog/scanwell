@@ -1,6 +1,5 @@
 <?php
 
-use App\Services\BarcodeLookupService;
 use App\Services\EdamamFoodDatabaseService;
 use App\Services\Gs1UsProductService;
 use Illuminate\Database\Migrations\Migration;
@@ -12,23 +11,6 @@ return new class extends Migration
     public function up(): void
     {
         $providers = [
-            [
-                'name' => 'Barcode Lookup',
-                'provider_key' => 'barcode_lookup',
-                'driver' => BarcodeLookupService::class,
-                'is_active' => false,
-                'priority' => 40,
-                'supported_families' => json_encode(['food', 'cosmetic', 'pet_food', 'household', 'general']),
-                'settings' => json_encode([
-                    'base_url' => config('services.barcode_lookup.base_url'),
-                ]),
-                'credentials' => null,
-                'timeout_seconds' => (int) config('services.barcode_lookup.timeout', 10),
-                'retry_attempts' => (int) config('services.barcode_lookup.retry_attempts', 1),
-                'cache_ttl_minutes' => 1440,
-                'health_status' => 'unknown',
-                'notes' => 'Paid barcode/product metadata API. Add the account API key in credentials JSON to enable it.',
-            ],
             [
                 'name' => 'Edamam Food Database',
                 'provider_key' => 'edamam',
@@ -113,7 +95,7 @@ return new class extends Migration
     public function down(): void
     {
         DB::table('scan_providers')
-            ->whereIn('provider_key', ['barcode_lookup', 'edamam', 'gs1_us'])
+            ->whereIn('provider_key', ['edamam', 'gs1_us'])
             ->delete();
     }
 };
