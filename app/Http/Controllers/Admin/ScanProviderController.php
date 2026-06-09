@@ -15,25 +15,10 @@ class ScanProviderController extends Controller
 {
     public function index(ScanProviderImportService $importService): View
     {
-        $providers = ScanProvider::query()
-            ->withCount([
-                'lookups',
-                'lookups as successful_lookups_count' => fn ($query) => $query->where('status', 'success'),
-                'lookups as failed_lookups_count' => fn ($query) => $query->where('status', 'error'),
-                'lookups as recent_lookups_count' => fn ($query) => $query->where('created_at', '>=', now()->subDays(7)),
-                'lookups as recent_successful_lookups_count' => fn ($query) => $query
-                    ->where('created_at', '>=', now()->subDays(7))
-                    ->where('status', 'success'),
-            ])
-            ->orderBy('priority')
-            ->orderBy('name')
+        $providers = $this->providerQuery()
             ->get();
 
-        $providers->each(function (ScanProvider $provider) use ($importService): void {
-            $provider->setAttribute('supports_import', $importService->supportsImport($provider));
-            $provider->setAttribute('import_config_summary', $importService->importConfigSummary($provider));
-            $provider->setAttribute('quality_metrics', $this->buildQualityMetrics($provider));
-        });
+        $this->hydrateProviders($providers, $importService);
 
         $recentLookups = ScanProviderLookup::query()
             ->with('provider')
@@ -41,7 +26,39 @@ class ScanProviderController extends Controller
             ->limit(20)
             ->get();
 
-        return view('admin.scanning.index', compact('providers', 'recentLookups'));
+        $overview = [
+            'providers' => $providers->count(),
+            'active' => $providers->where('is_active', true)->count(),
+            'healthy' => $providers->where('health_status', 'healthy')->count(),
+            'degraded' => $providers->where('health_status', 'degraded')->count(),
+            'recent_attempts' => $providers->sum('recent_lookups_count'),
+            'recent_successes' => $providers->sum('recent_successful_lookups_count'),
+        ];
+
+        return view('admin.scanning.index', compact('providers', 'recentLookups', 'overview'));
+    }
+
+    public function edit(ScanProvider $scanProvider, ScanProviderImportService $importService): View
+    {
+        $scanProvider->loadCount([
+            'lookups',
+            'lookups as successful_lookups_count' => fn ($query) => $query->where('status', 'success'),
+            'lookups as failed_lookups_count' => fn ($query) => $query->where('status', 'error'),
+            'lookups as recent_lookups_count' => fn ($query) => $query->where('created_at', '>=', now()->subDays(7)),
+            'lookups as recent_successful_lookups_count' => fn ($query) => $query
+                ->where('created_at', '>=', now()->subDays(7))
+                ->where('status', 'success'),
+        ]);
+
+        $this->hydrateProviders(collect([$scanProvider]), $importService);
+
+        $recentLookups = ScanProviderLookup::query()
+            ->where('scan_provider_id', $scanProvider->id)
+            ->latest()
+            ->limit(20)
+            ->get();
+
+        return view('admin.scanning.edit', compact('scanProvider', 'recentLookups'));
     }
 
     public function update(Request $request, ScanProvider $scanProvider): RedirectResponse
@@ -129,6 +146,31 @@ class ScanProviderController extends Controller
             ->unique()
             ->values()
             ->all();
+    }
+
+    protected function providerQuery()
+    {
+        return ScanProvider::query()
+            ->withCount([
+                'lookups',
+                'lookups as successful_lookups_count' => fn ($query) => $query->where('status', 'success'),
+                'lookups as failed_lookups_count' => fn ($query) => $query->where('status', 'error'),
+                'lookups as recent_lookups_count' => fn ($query) => $query->where('created_at', '>=', now()->subDays(7)),
+                'lookups as recent_successful_lookups_count' => fn ($query) => $query
+                    ->where('created_at', '>=', now()->subDays(7))
+                    ->where('status', 'success'),
+            ])
+            ->orderBy('priority')
+            ->orderBy('name');
+    }
+
+    protected function hydrateProviders($providers, ScanProviderImportService $importService): void
+    {
+        $providers->each(function (ScanProvider $provider) use ($importService): void {
+            $provider->setAttribute('supports_import', $importService->supportsImport($provider));
+            $provider->setAttribute('import_config_summary', $importService->importConfigSummary($provider));
+            $provider->setAttribute('quality_metrics', $this->buildQualityMetrics($provider));
+        });
     }
 
     protected function buildProviderSettings(ScanProvider $scanProvider, array $validated): array
