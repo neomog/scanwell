@@ -22,7 +22,7 @@
                 <div class="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                         <h3 class="text-lg font-semibold text-slate-900">Provider List</h3>
-                        <p class="mt-1 text-sm text-slate-500">Clean inventory view for provider review, routing, and quick operational decisions.</p>
+                        <p class="mt-1 text-sm text-slate-500">Clean inventory view for provider review, instant activation, and fast routing into setup for keys and endpoint configuration.</p>
                     </div>
                     <div class="inline-flex items-center rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
                         {{ $providers->count() }} configured providers
@@ -106,18 +106,32 @@
                                         <div class="mt-1 text-xs text-slate-500">Confidence {{ $provider->quality_metrics['average_confidence'] ?? 'N/A' }}</div>
                                     </td>
                                     <td class="px-6 py-4">
-                                        <div class="flex items-center gap-2">
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <form method="POST" action="{{ route('admin.scanning.providers.toggle-active', $provider) }}">
+                                                @csrf
+                                                <button
+                                                    type="submit"
+                                                    class="inline-flex items-center rounded-md border px-2.5 py-1.5 text-xs font-medium transition {{ $provider->is_active ? 'border-red-200 bg-white text-red-700 hover:bg-red-50' : 'border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50' }}"
+                                                >
+                                                    {{ $provider->is_active ? 'Disable' : 'Enable' }}
+                                                </button>
+                                            </form>
                                             <button
                                                 type="button"
-                                                class="inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                                                class="inline-flex items-center rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
                                                 data-provider='@json($providerModal)'
                                                 data-provider-view
                                             >
                                                 View
                                             </button>
-                                            <a href="{{ route('admin.scanning.providers.edit', $provider) }}" class="inline-flex items-center rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 transition">
-                                                Edit
-                                            </a>
+                                            <form method="GET" action="{{ route('admin.scanning.providers.edit', $provider) }}">
+                                                <button
+                                                    type="submit"
+                                                    class="inline-flex items-center rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+                                                >
+                                                    Edit Setup
+                                                </button>
+                                            </form>
                                         </div>
                                     </td>
                                 </tr>
