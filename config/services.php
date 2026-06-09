@@ -71,16 +71,6 @@ return [
         'retry_attempts' => env('BARCODE_LOOKUP_RETRY_ATTEMPTS', 1),
     ],
 
-    'upcitemdb' => [
-        'mode' => env('UPCITEMDB_MODE', 'trial'),
-        'trial_base_url' => env('UPCITEMDB_TRIAL_BASE_URL', 'https://api.upcitemdb.com/prod/trial/lookup'),
-        'prod_base_url' => env('UPCITEMDB_PROD_BASE_URL', 'https://api.upcitemdb.com/prod/v1/lookup'),
-        'user_key' => env('UPCITEMDB_USER_KEY'),
-        'key_type' => env('UPCITEMDB_KEY_TYPE', '3scale'),
-        'timeout' => env('UPCITEMDB_TIMEOUT', 10),
-        'retry_attempts' => env('UPCITEMDB_RETRY_ATTEMPTS', 1),
-    ],
-
     'edamam' => [
         'base_url' => env('EDAMAM_BASE_URL', 'https://api.edamam.com/api/food-database/v2/parser'),
         'app_id' => env('EDAMAM_APP_ID'),

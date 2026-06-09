@@ -255,37 +255,6 @@
                                         <input type="url" name="open_pet_food_facts_base_url" value="{{ old('open_pet_food_facts_base_url', data_get($provider->settings, 'sources.3.base_url', 'https://world.openpetfoodfacts.org/api/v2')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
                                     </div>
                                 </div>
-                            @elseif($provider->provider_key === 'upcitemdb')
-                                <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
-                                    <div>
-                                        <h4 class="text-sm font-semibold text-slate-900">Provider Settings</h4>
-                                        <p class="mt-1 text-xs text-slate-600">Trial mode works without credentials. Production mode requires a user key.</p>
-                                    </div>
-
-                                    <div class="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-1">Mode</label>
-                                            <select name="upcitemdb_mode" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
-                                                <option value="trial" @selected(old('upcitemdb_mode', data_get($provider->settings, 'mode', 'trial')) === 'trial')>Trial</option>
-                                                <option value="prod" @selected(old('upcitemdb_mode', data_get($provider->settings, 'mode', 'trial')) === 'prod')>Production</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-1">Key Type</label>
-                                            <input type="text" name="upcitemdb_key_type" value="{{ old('upcitemdb_key_type', data_get($provider->settings, 'key_type', '3scale')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
-                                        <input type="url" name="upcitemdb_base_url" value="{{ old('upcitemdb_base_url', data_get($provider->settings, 'base_url', 'https://api.upcitemdb.com/prod/trial/lookup')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]">
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">User Key</label>
-                                        <input type="text" name="upcitemdb_user_key" value="{{ old('upcitemdb_user_key', data_get($provider->credentials, 'user_key')) }}" class="w-full rounded-lg border-gray-300 focus:border-[#1FA774] focus:ring-[#1FA774]" placeholder="Required for production mode">
-                                    </div>
-                                </div>
                             @elseif($provider->provider_key === 'barcode_lookup')
                                 <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
                                     <div>

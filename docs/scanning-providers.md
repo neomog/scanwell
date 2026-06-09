@@ -9,11 +9,6 @@ This document complements the multi-provider scan engine and the super-admin pro
   - Type: free
   - Covers: `food`, `cosmetic`, `pet_food`, `household`, `general`
 
-- `upcitemdb`
-  - Driver: `App\Services\UpcItemDbService`
-  - Type: free trial or paid
-  - Covers: `food`, `cosmetic`, `pet_food`, `household`, `general`
-
 - `barcode_lookup`
   - Driver: `App\Services\BarcodeLookupService`
   - Type: paid
@@ -44,16 +39,6 @@ For each provider you can:
 - run a provider-specific `Sync Products` action when the driver supports imports
 
 ## Credentials JSON examples
-
-### UPCitemdb
-
-Free trial mode can run without credentials. Paid mode requires a `user_key`.
-
-```json
-{
-  "user_key": "your_upcitemdb_user_key"
-}
-```
 
 ### Barcode Lookup
 
@@ -108,26 +93,6 @@ Notes:
 
 ## Settings JSON examples
 
-### UPCitemdb
-
-```json
-{
-  "mode": "trial",
-  "base_url": "https://api.upcitemdb.com/prod/trial/lookup",
-  "key_type": "3scale"
-}
-```
-
-For paid mode:
-
-```json
-{
-  "mode": "prod",
-  "base_url": "https://api.upcitemdb.com/prod/v1/lookup",
-  "key_type": "3scale"
-}
-```
-
 ### Barcode Lookup
 
 ```json
@@ -166,8 +131,7 @@ Suggested production order:
 1. `gs1_us`
 2. `open_facts`
 3. `edamam`
-4. `upcitemdb`
-5. `barcode_lookup`
+4. `barcode_lookup`
 
 That order gives you:
 

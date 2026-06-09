@@ -3,7 +3,6 @@
 use App\Services\BarcodeLookupService;
 use App\Services\EdamamFoodDatabaseService;
 use App\Services\Gs1UsProductService;
-use App\Services\UpcItemDbService;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -13,27 +12,6 @@ return new class extends Migration
     public function up(): void
     {
         $providers = [
-            [
-                'name' => 'UPCitemdb',
-                'provider_key' => 'upcitemdb',
-                'driver' => UpcItemDbService::class,
-                'is_active' => true,
-                'priority' => 30,
-                'supported_families' => json_encode(['food', 'cosmetic', 'pet_food', 'household', 'general']),
-                'settings' => json_encode([
-                    'mode' => config('services.upcitemdb.mode', 'trial'),
-                    'base_url' => config('services.upcitemdb.mode', 'trial') === 'prod'
-                        ? config('services.upcitemdb.prod_base_url')
-                        : config('services.upcitemdb.trial_base_url'),
-                    'key_type' => config('services.upcitemdb.key_type', '3scale'),
-                ]),
-                'credentials' => null,
-                'timeout_seconds' => (int) config('services.upcitemdb.timeout', 10),
-                'retry_attempts' => (int) config('services.upcitemdb.retry_attempts', 1),
-                'cache_ttl_minutes' => 720,
-                'health_status' => 'unknown',
-                'notes' => 'Public barcode database. Trial mode is available without credentials but is heavily rate-limited; prod mode requires a user_key.',
-            ],
             [
                 'name' => 'Barcode Lookup',
                 'provider_key' => 'barcode_lookup',
@@ -135,7 +113,7 @@ return new class extends Migration
     public function down(): void
     {
         DB::table('scan_providers')
-            ->whereIn('provider_key', ['upcitemdb', 'barcode_lookup', 'edamam', 'gs1_us'])
+            ->whereIn('provider_key', ['barcode_lookup', 'edamam', 'gs1_us'])
             ->delete();
     }
 };

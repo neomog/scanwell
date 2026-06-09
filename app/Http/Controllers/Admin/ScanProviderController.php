@@ -60,10 +60,6 @@ class ScanProviderController extends Controller
             'open_beauty_facts_base_url' => 'nullable|url|max:255',
             'open_product_facts_base_url' => 'nullable|url|max:255',
             'open_pet_food_facts_base_url' => 'nullable|url|max:255',
-            'upcitemdb_mode' => 'nullable|string|in:trial,prod',
-            'upcitemdb_base_url' => 'nullable|url|max:255',
-            'upcitemdb_key_type' => 'nullable|string|max:50',
-            'upcitemdb_user_key' => 'nullable|string|max:255',
             'barcode_lookup_base_url' => 'nullable|url|max:255',
             'barcode_lookup_api_key' => 'nullable|string|max:255',
             'edamam_base_url' => 'nullable|url|max:255',
@@ -170,14 +166,6 @@ class ScanProviderController extends Controller
                     ],
                 ];
                 break;
-            case 'upcitemdb':
-                $settings['mode'] = $validated['upcitemdb_mode'] ?: 'trial';
-                $settings['base_url'] = $validated['upcitemdb_base_url']
-                    ?: ($settings['mode'] === 'prod'
-                        ? 'https://api.upcitemdb.com/prod/v1/lookup'
-                        : 'https://api.upcitemdb.com/prod/trial/lookup');
-                $settings['key_type'] = $validated['upcitemdb_key_type'] ?: '3scale';
-                break;
             case 'barcode_lookup':
                 $settings['base_url'] = $validated['barcode_lookup_base_url'] ?: 'https://api.barcodelookup.com/v3/products';
                 break;
@@ -219,9 +207,6 @@ class ScanProviderController extends Controller
     protected function buildProviderCredentials(ScanProvider $scanProvider, array $validated): array
     {
         return match ($scanProvider->provider_key) {
-            'upcitemdb' => array_filter([
-                'user_key' => trim((string) ($validated['upcitemdb_user_key'] ?? '')),
-            ]),
             'barcode_lookup' => array_filter([
                 'api_key' => trim((string) ($validated['barcode_lookup_api_key'] ?? '')),
             ]),
