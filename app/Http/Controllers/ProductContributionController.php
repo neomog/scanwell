@@ -3,12 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\IngredientImageExtractRequest;
+use App\Http\Requests\NutritionImageExtractRequest;
 use App\Http\Resources\ProductContributionResource;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
 use App\Models\ProductContribution;
 use App\Services\ContributionReputationService;
 use App\Services\IngredientImageExtractionService;
+use App\Services\NutritionImageExtractionService;
 use App\Services\ProductContributionService;
 use App\Services\ProductPayloadService;
 use Illuminate\Http\JsonResponse;
@@ -23,7 +25,8 @@ class ProductContributionController extends Controller
         protected ProductContributionService $productContributionService,
         protected ProductPayloadService $productPayloadService,
         protected ContributionReputationService $contributionReputationService,
-        protected IngredientImageExtractionService $ingredientImageExtractionService
+        protected IngredientImageExtractionService $ingredientImageExtractionService,
+        protected NutritionImageExtractionService $nutritionImageExtractionService
     ) {
     }
 
@@ -41,6 +44,24 @@ class ProductContributionController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Ingredients extracted successfully',
+            'data' => $result,
+        ]);
+    }
+
+    public function extractNutrition(NutritionImageExtractRequest $request): JsonResponse
+    {
+        $result = $this->nutritionImageExtractionService->extractFromImage($request->file('image'));
+
+        if ($result === null) {
+            return response()->json([
+                'success' => false,
+                'message' => 'We could not extract readable nutrition facts from the image. Please retake the photo with the nutrition panel clearly visible.',
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Nutrition facts extracted successfully',
             'data' => $result,
         ]);
     }

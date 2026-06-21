@@ -42,7 +42,7 @@ return [
         'redirect' => env('GOOGLE_REDIRECT'),
         'expo_client_id' => env('GOOGLE_EXPO_CLIENT_ID'),
         'android_client_id' => env('GOOGLE_ANDROID_CLIENT_ID'),
-//        'ios_client_id' => env('GOOGLE_IOS_CLIENT_ID'),
+        'ios_client_id' => env('GOOGLE_IOS_CLIENT_ID'),
     ],
 
     'facebook' => [
