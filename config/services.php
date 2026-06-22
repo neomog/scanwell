@@ -93,4 +93,13 @@ return [
         'timeout' => env('GOOGLE_CLOUD_VISION_TIMEOUT', 30),
     ],
 
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+        'timeout' => env('OPENAI_TIMEOUT', 30),
+        'image_recognition_model' => env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini'),
+        'ingredient_extraction_model' => env('OPENAI_INGREDIENT_EXTRACTION_MODEL', env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini')),
+        'nutrition_extraction_model' => env('OPENAI_NUTRITION_EXTRACTION_MODEL', env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini')),
+    ],
+
 ];

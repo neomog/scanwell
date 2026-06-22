@@ -72,6 +72,7 @@ class GoogleCloudVisionService
 
         return [
             'extracted_text' => $fullText,
+            'document_lines' => $this->extractDocumentLines($annotation),
             'product_name' => $guesses['product_name'],
             'brand' => $guesses['brand'],
             'barcode_hint' => $this->extractBarcodeHint($fullText),
@@ -221,6 +222,133 @@ class GoogleCloudVisionService
         }
 
         return round(array_sum($confidences) / count($confidences), 4);
+    }
+
+    protected function extractDocumentLines(array $annotation): array
+    {
+        $lines = [];
+
+        foreach (data_get($annotation, 'fullTextAnnotation.pages', []) as $page) {
+            $pageWords = [];
+
+            foreach (($page['blocks'] ?? []) as $block) {
+                foreach (($block['paragraphs'] ?? []) as $paragraph) {
+                    foreach (($paragraph['words'] ?? []) as $word) {
+                        $text = $this->extractWordText($word);
+                        $box = $this->extractBoundingBox($word['boundingBox']['vertices'] ?? []);
+
+                        if ($text === null || $box === null) {
+                            continue;
+                        }
+
+                        $pageWords[] = [
+                            'text' => $text,
+                            'x_min' => $box['x_min'],
+                            'x_max' => $box['x_max'],
+                            'y_center' => ($box['y_min'] + $box['y_max']) / 2,
+                        ];
+                    }
+                }
+            }
+
+            if ($pageWords === []) {
+                continue;
+            }
+
+            usort($pageWords, function (array $a, array $b): int {
+                if (abs($a['y_center'] - $b['y_center']) < 0.001) {
+                    return $a['x_min'] <=> $b['x_min'];
+                }
+
+                return $a['y_center'] <=> $b['y_center'];
+            });
+
+            $rowThreshold = max(10.0, ((float) ($page['height'] ?? 1000)) * 0.015);
+            $rows = [];
+
+            foreach ($pageWords as $word) {
+                $placed = false;
+
+                foreach ($rows as &$row) {
+                    if (abs($row['y_center'] - $word['y_center']) <= $rowThreshold) {
+                        $row['words'][] = $word;
+                        $row['y_center'] = ($row['y_center'] + $word['y_center']) / 2;
+                        $placed = true;
+                        break;
+                    }
+                }
+                unset($row);
+
+                if (!$placed) {
+                    $rows[] = [
+                        'y_center' => $word['y_center'],
+                        'words' => [$word],
+                    ];
+                }
+            }
+
+            foreach ($rows as $row) {
+                usort($row['words'], fn (array $a, array $b): int => $a['x_min'] <=> $b['x_min']);
+
+                $line = collect($row['words'])
+                    ->pluck('text')
+                    ->filter()
+                    ->implode(' ');
+
+                $line = $this->cleanLine($line);
+
+                if ($line !== null) {
+                    $lines[] = $line;
+                }
+            }
+        }
+
+        return array_values(array_unique($lines));
+    }
+
+    protected function extractWordText(array $word): ?string
+    {
+        $symbols = $word['symbols'] ?? [];
+
+        if (!is_array($symbols) || $symbols === []) {
+            return null;
+        }
+
+        $text = collect($symbols)
+            ->map(fn ($symbol) => is_array($symbol) ? ($symbol['text'] ?? '') : '')
+            ->implode('');
+
+        return $this->cleanLine($text);
+    }
+
+    protected function extractBoundingBox(array $vertices): ?array
+    {
+        if ($vertices === []) {
+            return null;
+        }
+
+        $xs = [];
+        $ys = [];
+
+        foreach ($vertices as $vertex) {
+            if (!is_array($vertex)) {
+                continue;
+            }
+
+            $xs[] = (float) ($vertex['x'] ?? 0);
+            $ys[] = (float) ($vertex['y'] ?? 0);
+        }
+
+        if ($xs === [] || $ys === []) {
+            return null;
+        }
+
+        return [
+            'x_min' => min($xs),
+            'x_max' => max($xs),
+            'y_min' => min($ys),
+            'y_max' => max($ys),
+        ];
     }
 
     protected function cleanLine(string $line): ?string

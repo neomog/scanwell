@@ -7,6 +7,11 @@ use Illuminate\Support\Facades\Storage;
 
 class ProductPayloadService
 {
+    public function __construct(
+        protected NutritionTextParserService $nutritionTextParserService
+    ) {
+    }
+
     public function fromInput(array $input): array
     {
         $payload = [];
@@ -69,8 +74,19 @@ class ProductPayloadService
             $payload['ingredients'] = $this->normalizeIngredients($input['ingredients']);
         }
 
+        if (array_key_exists('nutrition_text', $input)) {
+            $parsedNutrition = $this->nutritionTextParserService->parse((string) $input['nutrition_text']);
+
+            if ($parsedNutrition !== []) {
+                $payload['nutrition'] = $this->normalizeNutrition($parsedNutrition);
+            }
+        }
+
         if (array_key_exists('nutrition', $input)) {
-            $payload['nutrition'] = $this->normalizeNutrition($input['nutrition']);
+            $payload['nutrition'] = array_merge(
+                $payload['nutrition'] ?? [],
+                $this->normalizeNutrition($input['nutrition'])
+            );
         }
 
         if (array_key_exists('barcodes', $input)) {

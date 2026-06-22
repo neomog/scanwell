@@ -47,6 +47,7 @@ class NutritionImageExtractionTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('success', true)
+            ->assertJsonPath('data.nutrition_text', 'Serving Size 1 sachet (30g)' . "\n" . 'Calories 120' . "\n" . 'Total Fat 8g' . "\n" . 'Saturated Fat 2g' . "\n" . 'Trans Fat 0g' . "\n" . 'Cholesterol 0mg' . "\n" . 'Sodium 180mg' . "\n" . 'Total Carbohydrate 16g' . "\n" . 'Dietary Fiber 3g' . "\n" . 'Total Sugars 6g' . "\n" . 'Includes 4g Added Sugars' . "\n" . 'Protein 5g')
             ->assertJsonPath('data.nutrition.serving_size', '1 sachet (30g)')
             ->assertJsonPath('data.nutrition.calories', 120)
             ->assertJsonPath('data.nutrition.fat', 8)
@@ -61,6 +62,201 @@ class NutritionImageExtractionTest extends TestCase
             ->assertJsonPath('data.nutrition.protein', 5)
             ->assertJsonPath('data.analysis_source', 'google_cloud_vision')
             ->assertJsonPath('data.ocr_mode', 'DOCUMENT_TEXT_DETECTION');
+    }
+
+    public function test_it_extracts_table_style_nutrition_labels_correctly(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
+
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'access_token' => 'google-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ]),
+            'https://vision.googleapis.com/v1/images:annotate' => Http::response([
+                'responses' => [[
+                    'fullTextAnnotation' => [
+                        'text' => "*NUTRITIONAL INFORMATION PER 100g OF PRODUCT\nEnergy 237kcal\nCarbohydrate 34g\nProtein 7.7g\nFat 6.5g\nSodium 74.2mg\nCalcium 214.5mg\nVitamin A 934 IU\nVitamin D 187 IU",
+                        'pages' => [[
+                            'blocks' => [
+                                ['confidence' => 0.95],
+                            ],
+                        ]],
+                    ],
+                ]],
+            ]),
+        ]);
+
+        $response = $this->post('/api/v1/contributions/nutrition/extract', [
+            'image' => UploadedFile::fake()->image('nutrition-table.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.nutrition_text', 'NUTRITIONAL INFORMATION PER 100g OF PRODUCT' . "\n" . 'Energy 237kcal' . "\n" . 'Carbohydrate 34g' . "\n" . 'Protein 7.7g' . "\n" . 'Fat 6.5g' . "\n" . 'Sodium 74.2mg' . "\n" . 'Calcium 214.5mg' . "\n" . 'Vitamin D 187 IU')
+            ->assertJsonPath('data.nutrition.serving_size', '100 g')
+            ->assertJsonPath('data.nutrition.calories', 237)
+            ->assertJsonPath('data.nutrition.carbohydrates', 34)
+            ->assertJsonPath('data.nutrition.protein', 7.7)
+            ->assertJsonPath('data.nutrition.fat', 6.5)
+            ->assertJsonPath('data.nutrition.sodium', 74.2)
+            ->assertJsonPath('data.nutrition.calcium', 214.5)
+            ->assertJsonPath('data.nutrition.vitamin_d', 187);
+    }
+
+    public function test_it_extracts_split_column_table_rows_correctly(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
+
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'access_token' => 'google-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ]),
+            'https://vision.googleapis.com/v1/images:annotate' => Http::response([
+                'responses' => [[
+                    'fullTextAnnotation' => [
+                        'text' => "*NUTRITIONAL INFORMATION PER 100g OF PRODUCT\nEnergy\n237kcal\nCarbohydrate\n34g\nProtein\n7.7g\nFat\n6.5g\nSodium\n74.2mg\nCalcium\n214.5mg\nVitamin D\n187 IU",
+                        'pages' => [[
+                            'blocks' => [
+                                ['confidence' => 0.95],
+                            ],
+                        ]],
+                    ],
+                ]],
+            ]),
+        ]);
+
+        $response = $this->post('/api/v1/contributions/nutrition/extract', [
+            'image' => UploadedFile::fake()->image('nutrition-split-table.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.nutrition_text', 'NUTRITIONAL INFORMATION PER 100g OF PRODUCT' . "\n" . 'Energy 237kcal' . "\n" . 'Carbohydrate 34g' . "\n" . 'Protein 7.7g' . "\n" . 'Fat 6.5g' . "\n" . 'Sodium 74.2mg' . "\n" . 'Calcium 214.5mg' . "\n" . 'Vitamin D 187 IU')
+            ->assertJsonPath('data.nutrition.calories', 237)
+            ->assertJsonPath('data.nutrition.carbohydrates', 34)
+            ->assertJsonPath('data.nutrition.protein', 7.7)
+            ->assertJsonPath('data.nutrition.fat', 6.5)
+            ->assertJsonPath('data.nutrition.sodium', 74.2)
+            ->assertJsonPath('data.nutrition.calcium', 214.5)
+            ->assertJsonPath('data.nutrition.vitamin_d', 187);
+    }
+
+    public function test_it_extracts_column_separated_table_blocks_correctly(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
+
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'access_token' => 'google-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ]),
+            'https://vision.googleapis.com/v1/images:annotate' => Http::response([
+                'responses' => [[
+                    'fullTextAnnotation' => [
+                        'text' => "*NUTRITIONAL INFORMATION PER 100g OF PRODUCT\nEnergy\nCarbohydrate\nProtein\nFat\nSodium\nCalcium\nVitamin D\n237kcal\n34g\n7.7g\n6.5g\n74.2mg\n214.5mg\n187 IU",
+                        'pages' => [[
+                            'blocks' => [
+                                ['confidence' => 0.95],
+                            ],
+                        ]],
+                    ],
+                ]],
+            ]),
+        ]);
+
+        $response = $this->post('/api/v1/contributions/nutrition/extract', [
+            'image' => UploadedFile::fake()->image('nutrition-column-blocks.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.nutrition_text', 'NUTRITIONAL INFORMATION PER 100g OF PRODUCT' . "\n" . 'Energy 237kcal' . "\n" . 'Carbohydrate 34g' . "\n" . 'Protein 7.7g' . "\n" . 'Fat 6.5g' . "\n" . 'Sodium 74.2mg' . "\n" . 'Calcium 214.5mg' . "\n" . 'Vitamin D 187 IU')
+            ->assertJsonPath('data.nutrition.calories', 237)
+            ->assertJsonPath('data.nutrition.carbohydrates', 34)
+            ->assertJsonPath('data.nutrition.protein', 7.7)
+            ->assertJsonPath('data.nutrition.fat', 6.5)
+            ->assertJsonPath('data.nutrition.sodium', 74.2)
+            ->assertJsonPath('data.nutrition.calcium', 214.5)
+            ->assertJsonPath('data.nutrition.vitamin_d', 187);
+    }
+
+    public function test_google_vision_layout_lines_can_reconstruct_rows_even_when_text_order_is_wrong(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        config()->set('services.openai.api_key', null);
+        config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
+
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'access_token' => 'google-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ]),
+            'https://vision.googleapis.com/v1/images:annotate' => Http::response([
+                'responses' => [[
+                    'fullTextAnnotation' => [
+                        'text' => "*NUTRITIONAL INFORMATION PER 100g OF PRODUCT\nEnergy\nCarbohydrate\nProtein\nFat\nSodium\nCalcium\nVitamin D\n237kcal\n34g\n7.7g\n6.5g\n74.2mg\n214.5mg\n187 IU",
+                        'pages' => [[
+                            'height' => 1000,
+                            'blocks' => [[
+                                'confidence' => 0.95,
+                                'paragraphs' => [
+                                    ['words' => [$this->fakeVisionWord('Energy', 40, 100)]],
+                                    ['words' => [$this->fakeVisionWord('237kcal', 360, 100)]],
+                                    ['words' => [$this->fakeVisionWord('Carbohydrate', 40, 150)]],
+                                    ['words' => [$this->fakeVisionWord('34g', 360, 150)]],
+                                    ['words' => [$this->fakeVisionWord('Protein', 40, 200)]],
+                                    ['words' => [$this->fakeVisionWord('7.7g', 360, 200)]],
+                                    ['words' => [$this->fakeVisionWord('Fat', 40, 250)]],
+                                    ['words' => [$this->fakeVisionWord('6.5g', 360, 250)]],
+                                    ['words' => [$this->fakeVisionWord('Sodium', 40, 300)]],
+                                    ['words' => [$this->fakeVisionWord('74.2mg', 360, 300)]],
+                                    ['words' => [$this->fakeVisionWord('Calcium', 40, 350)]],
+                                    ['words' => [$this->fakeVisionWord('214.5mg', 360, 350)]],
+                                    ['words' => [$this->fakeVisionWord('Vitamin', 40, 400), $this->fakeVisionWord('D', 130, 400)]],
+                                    ['words' => [$this->fakeVisionWord('187', 360, 400), $this->fakeVisionWord('IU', 430, 400)]],
+                                ],
+                            ]],
+                        ]],
+                    ],
+                ]],
+            ]),
+        ]);
+
+        $response = $this->post('/api/v1/contributions/nutrition/extract', [
+            'image' => UploadedFile::fake()->image('nutrition-layout-lines.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.nutrition_text', 'NUTRITIONAL INFORMATION PER 100g OF PRODUCT' . "\n" . 'Energy 237kcal' . "\n" . 'Carbohydrate 34g' . "\n" . 'Protein 7.7g' . "\n" . 'Fat 6.5g' . "\n" . 'Sodium 74.2mg' . "\n" . 'Calcium 214.5mg' . "\n" . 'Vitamin D 187 IU')
+            ->assertJsonPath('data.nutrition.calories', 237)
+            ->assertJsonPath('data.nutrition.carbohydrates', 34)
+            ->assertJsonPath('data.nutrition.protein', 7.7)
+            ->assertJsonPath('data.nutrition.fat', 6.5)
+            ->assertJsonPath('data.nutrition.sodium', 74.2)
+            ->assertJsonPath('data.nutrition.calcium', 214.5)
+            ->assertJsonPath('data.nutrition.vitamin_d', 187);
     }
 
     public function test_it_returns_unprocessable_when_no_nutrition_values_can_be_extracted(): void
@@ -95,6 +291,55 @@ class NutritionImageExtractionTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonPath('success', false);
+    }
+
+    public function test_it_prefers_openai_structured_nutrition_extraction_when_available(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        config()->set('services.openai.api_key', 'test-openai-key');
+
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response([
+                'output' => [[
+                    'content' => [[
+                        'text' => json_encode([
+                            'serving_basis' => 'per 100g',
+                            'confidence' => 97,
+                            'nutrients' => [
+                                ['key' => 'energy', 'value' => 237, 'unit' => 'kcal'],
+                                ['key' => 'carbohydrate', 'value' => 34, 'unit' => 'g'],
+                                ['key' => 'protein', 'value' => 7.7, 'unit' => 'g'],
+                                ['key' => 'fat', 'value' => 6.5, 'unit' => 'g'],
+                                ['key' => 'sodium', 'value' => 74.2, 'unit' => 'mg'],
+                                ['key' => 'calcium', 'value' => 214.5, 'unit' => 'mg'],
+                                ['key' => 'vitamin_d', 'value' => 187, 'unit' => 'IU'],
+                            ],
+                        ], JSON_THROW_ON_ERROR),
+                    ]],
+                ]],
+            ]),
+        ]);
+
+        $response = $this->post('/api/v1/contributions/nutrition/extract', [
+            'image' => UploadedFile::fake()->image('nutrition-openai.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.nutrition_text', 'per 100g' . "\n" . 'Energy 237kcal' . "\n" . 'Carbohydrate 34g' . "\n" . 'Protein 7.7g' . "\n" . 'Fat 6.5g' . "\n" . 'Sodium 74.2mg' . "\n" . 'Calcium 214.5mg' . "\n" . 'Vitamin D 187IU')
+            ->assertJsonPath('data.nutrition.serving_size', 'per 100g')
+            ->assertJsonPath('data.nutrition.calories', 237)
+            ->assertJsonPath('data.nutrition.carbohydrates', 34)
+            ->assertJsonPath('data.nutrition.protein', 7.7)
+            ->assertJsonPath('data.nutrition.fat', 6.5)
+            ->assertJsonPath('data.nutrition.sodium', 74.2)
+            ->assertJsonPath('data.nutrition.calcium', 214.5)
+            ->assertJsonPath('data.nutrition.vitamin_d', 187)
+            ->assertJsonPath('data.analysis_source', 'openai_vision')
+            ->assertJsonPath('data.ocr_mode', 'structured_nutrition_json');
     }
 
     protected function fakeGoogleCredentialsJson(): string
@@ -136,5 +381,30 @@ KEY,
             'client_email' => 'vision-ocr@scanwell-test.iam.gserviceaccount.com',
             'client_id' => '1234567890',
         ], JSON_THROW_ON_ERROR);
+    }
+
+    protected function fakeVisionWord(string $text, int $x, int $y): array
+    {
+        $symbols = [];
+        $cursor = $x;
+
+        foreach (mb_str_split($text) as $character) {
+            $symbols[] = [
+                'text' => $character,
+            ];
+            $cursor += 12;
+        }
+
+        return [
+            'symbols' => $symbols,
+            'boundingBox' => [
+                'vertices' => [
+                    ['x' => $x, 'y' => $y],
+                    ['x' => max($x + 10, $cursor), 'y' => $y],
+                    ['x' => max($x + 10, $cursor), 'y' => $y + 20],
+                    ['x' => $x, 'y' => $y + 20],
+                ],
+            ],
+        ];
     }
 }

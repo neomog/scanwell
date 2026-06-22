@@ -17,6 +17,7 @@ class IngredientImageExtractionTest extends TestCase
     {
         Sanctum::actingAs(User::factory()->create());
 
+        config()->set('services.openai.api_key', null);
         config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
 
         Http::fake([
@@ -58,6 +59,7 @@ class IngredientImageExtractionTest extends TestCase
     {
         Sanctum::actingAs(User::factory()->create());
 
+        config()->set('services.openai.api_key', null);
         config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
 
         Http::fake([
@@ -86,6 +88,94 @@ class IngredientImageExtractionTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonPath('success', false);
+    }
+
+    public function test_google_vision_lines_can_reconstruct_wrapped_ingredient_lists(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        config()->set('services.openai.api_key', null);
+        config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
+
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'access_token' => 'google-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ]),
+            'https://vision.googleapis.com/v1/images:annotate' => Http::response([
+                'responses' => [[
+                    'fullTextAnnotation' => [
+                        'text' => "INGREDIENTS\nWater,\nSugar,\nCitric Acid,\nNatural Flavors\nContains: None",
+                        'pages' => [[
+                            'height' => 1000,
+                            'blocks' => [[
+                                'confidence' => 0.95,
+                                'paragraphs' => [
+                                    ['words' => [$this->fakeVisionWord('INGREDIENTS', 40, 100)]],
+                                    ['words' => [$this->fakeVisionWord('Water,', 40, 140)]],
+                                    ['words' => [$this->fakeVisionWord('Sugar,', 40, 180)]],
+                                    ['words' => [$this->fakeVisionWord('Citric', 40, 220), $this->fakeVisionWord('Acid,', 120, 220)]],
+                                    ['words' => [$this->fakeVisionWord('Natural', 40, 260), $this->fakeVisionWord('Flavors', 130, 260)]],
+                                    ['words' => [$this->fakeVisionWord('Contains:', 40, 320), $this->fakeVisionWord('None', 150, 320)]],
+                                ],
+                            ]],
+                        ]],
+                    ],
+                ]],
+            ]),
+        ]);
+
+        $response = $this->post('/api/v1/contributions/ingredients/extract', [
+            'image' => UploadedFile::fake()->image('ingredients-lines.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.ingredients_text', 'Water, Sugar, Citric Acid, Natural Flavors')
+            ->assertJsonPath('data.ingredients.0', 'Water')
+            ->assertJsonPath('data.ingredients.3', 'Natural Flavors');
+    }
+
+    public function test_it_prefers_openai_structured_ingredient_extraction_when_available(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        config()->set('services.openai.api_key', 'test-openai-key');
+
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response([
+                'output' => [[
+                    'content' => [[
+                        'text' => json_encode([
+                            'confidence' => 98,
+                            'ingredients' => [
+                                'Water',
+                                'Sugar',
+                                'Citric Acid',
+                                'Natural Flavors',
+                            ],
+                        ], JSON_THROW_ON_ERROR),
+                    ]],
+                ]],
+            ]),
+        ]);
+
+        $response = $this->post('/api/v1/contributions/ingredients/extract', [
+            'image' => UploadedFile::fake()->image('ingredients-openai.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.ingredients_text', 'Water, Sugar, Citric Acid, Natural Flavors')
+            ->assertJsonPath('data.ingredients.0', 'Water')
+            ->assertJsonPath('data.ingredients.3', 'Natural Flavors')
+            ->assertJsonPath('data.analysis_source', 'openai_vision')
+            ->assertJsonPath('data.ocr_mode', 'structured_ingredients_json');
     }
 
     protected function fakeGoogleCredentialsJson(): string
@@ -127,5 +217,30 @@ KEY,
             'client_email' => 'vision-ocr@scanwell-test.iam.gserviceaccount.com',
             'client_id' => '1234567890',
         ], JSON_THROW_ON_ERROR);
+    }
+
+    protected function fakeVisionWord(string $text, int $x, int $y): array
+    {
+        $symbols = [];
+        $cursor = $x;
+
+        foreach (mb_str_split($text) as $character) {
+            $symbols[] = [
+                'text' => $character,
+            ];
+            $cursor += 12;
+        }
+
+        return [
+            'symbols' => $symbols,
+            'boundingBox' => [
+                'vertices' => [
+                    ['x' => $x, 'y' => $y],
+                    ['x' => max($x + 10, $cursor), 'y' => $y],
+                    ['x' => max($x + 10, $cursor), 'y' => $y + 20],
+                    ['x' => $x, 'y' => $y + 20],
+                ],
+            ],
+        ];
     }
 }
