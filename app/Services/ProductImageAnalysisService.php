@@ -15,17 +15,20 @@ class ProductImageAnalysisService
 {
     public function __construct(
         protected ProductAnalysisService $productAnalysisService,
-        protected GoogleCloudVisionService $googleCloudVisionService
+        protected GoogleCloudVisionService $googleCloudVisionService,
+        protected OpenAiProductImageIdentityService $openAiProductImageIdentityService
     ) {
     }
 
     public function analyze(UploadedFile $image, array $input, ?string $userId = null, ?Scan $scan = null): array
     {
         $storedImage = $this->storeImage($image);
-        $ocrOutput = $this->googleCloudVisionService->analyzeProductImage(
-            (string) file_get_contents($image->getRealPath()),
-            $image->getMimeType() ?: 'image/jpeg'
-        );
+        $imageBinary = (string) file_get_contents($image->getRealPath());
+        $mimeType = $image->getMimeType() ?: 'image/jpeg';
+
+        $openAiOutput = $this->openAiProductImageIdentityService->extractFromImage($imageBinary, $mimeType);
+        $visionOutput = $this->googleCloudVisionService->analyzeProductImage($imageBinary, $mimeType);
+        $ocrOutput = $this->mergeOcrOutputs($openAiOutput, $visionOutput);
         $signals = $this->extractSignals($input, $ocrOutput ?? []);
         $this->storeDebugSignalsOnScan($scan, $storedImage, $ocrOutput, $signals);
 
@@ -152,11 +155,85 @@ class ProductImageAnalysisService
             'confidence' => isset($ocrOutput['confidence']) && is_numeric($ocrOutput['confidence'])
                 ? round(max(0, min(1, (float) $ocrOutput['confidence'])), 4)
                 : null,
-            'analysis_source' => isset($ocrOutput['provider']) ? 'google_cloud_vision' : 'client_hints',
+            'analysis_source' => $this->analysisSourceFromProvider($ocrOutput['provider'] ?? null),
             'ocr_provider' => $this->nullableString($ocrOutput['provider'] ?? null),
             'ocr_mode' => $this->nullableString($ocrOutput['mode'] ?? null),
             'ocr_output' => $ocrOutput,
         ];
+    }
+
+    protected function mergeOcrOutputs(?array $openAiOutput, ?array $visionOutput): ?array
+    {
+        if ($openAiOutput === null && $visionOutput === null) {
+            return null;
+        }
+
+        if ($openAiOutput === null) {
+            return $visionOutput;
+        }
+
+        if ($visionOutput === null) {
+            return $openAiOutput;
+        }
+
+        return [
+            'extracted_text' => $this->mergeExtractedText(
+                $openAiOutput['extracted_text'] ?? null,
+                $visionOutput['extracted_text'] ?? null
+            ),
+            'document_lines' => is_array($visionOutput['document_lines'] ?? null)
+                ? $visionOutput['document_lines']
+                : [],
+            'product_name' => $this->nullableString($openAiOutput['product_name'] ?? null)
+                ?? $this->nullableString($visionOutput['product_name'] ?? null),
+            'brand' => $this->nullableString($openAiOutput['brand'] ?? null)
+                ?? $this->nullableString($visionOutput['brand'] ?? null),
+            'barcode_hint' => $this->nullableString($visionOutput['barcode_hint'] ?? null)
+                ?? $this->nullableString($openAiOutput['barcode_hint'] ?? null),
+            'confidence' => max(
+                is_numeric($openAiOutput['confidence'] ?? null) ? (float) $openAiOutput['confidence'] : 0.0,
+                is_numeric($visionOutput['confidence'] ?? null) ? (float) $visionOutput['confidence'] : 0.0
+            ),
+            'provider' => 'hybrid_vision',
+            'mode' => 'structured_product_identity_json+DOCUMENT_TEXT_DETECTION',
+            'providers' => [
+                $openAiOutput['provider'] ?? null,
+                $visionOutput['provider'] ?? null,
+            ],
+        ];
+    }
+
+    protected function mergeExtractedText(mixed $primary, mixed $fallback): ?string
+    {
+        $parts = collect([
+            $this->nullableString($primary),
+            $this->nullableString($fallback),
+        ])->filter();
+
+        if ($parts->isEmpty()) {
+            return null;
+        }
+
+        return $parts
+            ->flatMap(function (string $text) {
+                return preg_split('/\R+/', $text) ?: [];
+            })
+            ->map(fn ($line) => $this->nullableString($line))
+            ->filter()
+            ->unique()
+            ->implode("\n");
+    }
+
+    protected function analysisSourceFromProvider(mixed $provider): string
+    {
+        $provider = $this->nullableString($provider);
+
+        return match ($provider) {
+            'openai_vision' => 'openai_vision',
+            'hybrid_vision' => 'hybrid_vision',
+            'google_cloud_vision' => 'google_cloud_vision',
+            default => 'client_hints',
+        };
     }
 
     protected function resolveBarcode(?string $clientBarcodeHint, ?string $ocrBarcodeHint, ?string $extractedText): array

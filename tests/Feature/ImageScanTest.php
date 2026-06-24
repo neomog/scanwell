@@ -68,6 +68,7 @@ class ImageScanTest extends TestCase
         Sanctum::actingAs(User::factory()->create());
         Storage::fake('public');
 
+        config()->set('services.openai.api_key', null);
         config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
 
         $barcode = '23456789';
@@ -136,6 +137,7 @@ class ImageScanTest extends TestCase
         Sanctum::actingAs(User::factory()->create());
         Storage::fake('public');
 
+        config()->set('services.openai.api_key', null);
         config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
 
         $product = Product::create([
@@ -185,6 +187,7 @@ class ImageScanTest extends TestCase
         Sanctum::actingAs(User::factory()->create());
         Storage::fake('public');
 
+        config()->set('services.openai.api_key', null);
         config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
 
         $product = Product::create([
@@ -230,6 +233,53 @@ class ImageScanTest extends TestCase
             ->assertJsonPath('data.product.barcode', $product->barcode)
             ->assertJsonPath('data.scan.scan_metadata.matched_by', 'image_alias_text_match')
             ->assertJsonPath('data.scan.scan_metadata.image_scan.signals.ocr_provider', 'google_cloud_vision');
+    }
+
+    public function test_image_scan_can_resolve_using_openai_identity_extraction(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        Storage::fake('public');
+
+        config()->set('services.openai.api_key', 'test-openai-key');
+
+        $product = Product::create([
+            'barcode' => '44556677',
+            'name' => 'Purified Water',
+            'brand' => 'Kirkland',
+            'category_id' => 1,
+            'source' => 'manual',
+            'raw_data' => [],
+        ]);
+
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response([
+                'output' => [[
+                    'content' => [[
+                        'text' => json_encode([
+                            'barcode_hint' => null,
+                            'product_name' => 'Purified Water',
+                            'brand' => 'Kirkland',
+                            'extracted_text' => 'Kirkland Purified Water',
+                            'confidence' => 96,
+                        ], JSON_THROW_ON_ERROR),
+                    ]],
+                ]],
+            ]),
+        ]);
+
+        $response = $this->post('/api/v1/scan/image', [
+            'image' => UploadedFile::fake()->image('openai-water.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.product.barcode', $product->barcode)
+            ->assertJsonPath('data.scan.scan_metadata.matched_by', 'image_brand_product_match')
+            ->assertJsonPath('data.scan.scan_metadata.analysis_source', 'openai_vision')
+            ->assertJsonPath('data.scan.scan_metadata.image_scan.ocr.provider', 'openai_vision')
+            ->assertJsonPath('data.scan.scan_metadata.image_scan.ocr.mode', 'structured_product_identity_json');
     }
 
     protected function fakeBarcodeResponses(string $barcode, array $foodResponse): array
