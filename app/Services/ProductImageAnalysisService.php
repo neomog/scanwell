@@ -16,7 +16,9 @@ class ProductImageAnalysisService
     public function __construct(
         protected ProductAnalysisService $productAnalysisService,
         protected GoogleCloudVisionService $googleCloudVisionService,
-        protected OpenAiProductImageIdentityService $openAiProductImageIdentityService
+        protected OpenAiProductImageIdentityService $openAiProductImageIdentityService,
+        protected IngredientTextParserService $ingredientTextParserService,
+        protected NutritionTextParserService $nutritionTextParserService
     ) {
     }
 
@@ -497,15 +499,47 @@ class ProductImageAnalysisService
 
     protected function buildMatchContext(array $signals): array
     {
+        $prefill = $this->buildContributionPrefillFromSignals($signals);
+
         return [
             'barcode' => $signals['barcode'] ?? null,
             'barcode_source' => $signals['barcode_source'] ?? null,
             'product_name' => $signals['product_name'] ?? null,
             'brand' => $signals['brand'] ?? null,
             'extracted_text' => $signals['extracted_text'] ?? null,
+            'ingredients_text' => $prefill['ingredients_text'] ?? null,
+            'nutrition_text' => $prefill['nutrition_text'] ?? null,
             'ocr_provider' => $signals['ocr_provider'] ?? null,
             'ocr_mode' => $signals['ocr_mode'] ?? null,
             'analysis_source' => $signals['analysis_source'] ?? null,
+        ];
+    }
+
+    protected function buildContributionPrefillFromSignals(array $signals): array
+    {
+        $ocrOutput = is_array($signals['ocr_output'] ?? null) ? $signals['ocr_output'] : [];
+        $documentLines = is_array($ocrOutput['document_lines'] ?? null) ? $ocrOutput['document_lines'] : [];
+        $extractedText = $this->nullableString($signals['extracted_text'] ?? null);
+
+        $ingredientsText = null;
+        $nutritionText = null;
+
+        if ($documentLines !== []) {
+            $ingredientsText = $this->ingredientTextParserService->extractIngredientsTextFromLines($documentLines);
+            $nutritionText = $this->nutritionTextParserService->extractNutritionTextFromLines($documentLines);
+        }
+
+        if ($ingredientsText === null && $extractedText !== null) {
+            $ingredientsText = $this->ingredientTextParserService->extractIngredientsText($extractedText);
+        }
+
+        if ($nutritionText === null && $extractedText !== null) {
+            $nutritionText = $this->nutritionTextParserService->extractNutritionText($extractedText);
+        }
+
+        return [
+            'ingredients_text' => $ingredientsText,
+            'nutrition_text' => $nutritionText,
         ];
     }
 
