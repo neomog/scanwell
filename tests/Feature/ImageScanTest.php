@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\ProductImage;
 use App\Models\Product;
+use App\Services\ProductImageSimilarityService;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -280,6 +282,179 @@ class ImageScanTest extends TestCase
             ->assertJsonPath('data.scan.scan_metadata.analysis_source', 'openai_vision')
             ->assertJsonPath('data.scan.scan_metadata.image_scan.ocr.provider', 'openai_vision')
             ->assertJsonPath('data.scan.scan_metadata.image_scan.ocr.mode', 'structured_product_identity_json');
+    }
+
+    public function test_image_scan_prefers_google_vision_identity_when_openai_guess_disagrees_at_lower_confidence(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        Storage::fake('public');
+
+        config()->set('services.openai.api_key', 'test-openai-key');
+        config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
+
+        $product = Product::create([
+            'barcode' => '12121212',
+            'name' => 'Hand Sanitizer Gel',
+            'brand' => 'Clorox',
+            'category_id' => 1,
+            'source' => 'manual',
+            'raw_data' => [],
+        ]);
+
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response([
+                'output' => [[
+                    'content' => [[
+                        'text' => json_encode([
+                            'barcode_hint' => null,
+                            'product_name' => 'Sanitizer Gel',
+                            'brand' => 'Purell',
+                            'extracted_text' => 'Purell Sanitizer Gel',
+                            'confidence' => 81,
+                        ], JSON_THROW_ON_ERROR),
+                    ]],
+                ]],
+            ]),
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'access_token' => 'google-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ]),
+            'https://vision.googleapis.com/v1/images:annotate' => Http::response([
+                'responses' => [[
+                    'fullTextAnnotation' => [
+                        'text' => "Clorox\nHand Sanitizer Gel",
+                        'pages' => [[
+                            'blocks' => [
+                                ['confidence' => 0.92],
+                            ],
+                        ]],
+                    ],
+                ]],
+            ]),
+        ]);
+
+        $response = $this->post('/api/v1/scan/image', [
+            'image' => UploadedFile::fake()->image('sanitizer.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.product.barcode', $product->barcode)
+            ->assertJsonPath('data.scan.scan_metadata.matched_by', 'image_brand_product_match')
+            ->assertJsonPath('data.scan.scan_metadata.analysis_source', 'hybrid_vision')
+            ->assertJsonPath('data.scan.scan_metadata.image_scan.signals.brand', 'Clorox')
+            ->assertJsonPath('data.scan.scan_metadata.image_scan.signals.product_name', 'Hand Sanitizer Gel');
+    }
+
+    public function test_image_scan_can_use_visual_similarity_to_break_variant_ties(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        Storage::fake('public');
+
+        config()->set('services.openai.api_key', null);
+        config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
+
+        $target = Product::create([
+            'barcode' => '77770001',
+            'name' => 'Sparkling Water Lime',
+            'brand' => 'Bubly',
+            'category_id' => 1,
+            'source' => 'manual',
+            'raw_data' => [],
+        ]);
+
+        $sibling = Product::create([
+            'barcode' => '77770002',
+            'name' => 'Sparkling Water Blackberry',
+            'brand' => 'Bubly',
+            'category_id' => 1,
+            'source' => 'manual',
+            'raw_data' => [],
+        ]);
+
+        ProductImage::create([
+            'product_id' => $target->id,
+            'url' => 'https://example.com/lime.jpg',
+            'source' => 'manual',
+            'is_primary' => true,
+            'sort_order' => 0,
+        ]);
+
+        ProductImage::create([
+            'product_id' => $sibling->id,
+            'url' => 'https://example.com/blackberry.jpg',
+            'source' => 'manual',
+            'is_primary' => true,
+            'sort_order' => 0,
+        ]);
+
+        $this->mock(ProductImageSimilarityService::class, function ($mock) use ($target, $sibling) {
+            $mock->shouldReceive('scoreProductsAgainstImage')
+                ->once()
+                ->andReturn([
+                    $target->id => [
+                        'similarity' => 0.96,
+                        'image_id' => 'img-lime',
+                        'image_url' => 'https://example.com/lime.jpg',
+                    ],
+                    $sibling->id => [
+                        'similarity' => 0.71,
+                        'image_id' => 'img-blackberry',
+                        'image_url' => 'https://example.com/blackberry.jpg',
+                    ],
+                ]);
+        });
+
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'access_token' => 'google-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ]),
+            'https://vision.googleapis.com/v1/images:annotate' => Http::response([
+                'responses' => [[
+                    'fullTextAnnotation' => [
+                        'text' => "Bubly\nSparkling Water",
+                        'pages' => [[
+                            'blocks' => [
+                                ['confidence' => 0.9],
+                            ],
+                        ]],
+                    ],
+                ]],
+            ]),
+            'https://world.openfoodfacts.org/api/v2/product/77770001.json' => Http::response([
+                'status' => 1,
+                'product' => [
+                    'code' => '77770001',
+                    'product_name' => 'Sparkling Water Lime',
+                    'brands' => 'Bubly',
+                    'categories' => 'Water, Sparkling water',
+                    'ingredients_text' => 'Carbonated Water, Natural Flavor',
+                    'nutriments' => [
+                        'energy-kcal_100g' => 0,
+                    ],
+                    'image_url' => 'https://example.com/lime.jpg',
+                ],
+            ]),
+            'https://world.openbeautyfacts.org/api/v2/product/77770001.json' => Http::response(['status' => 0], 404),
+            'https://world.openproductfacts.org/api/v2/product/77770001.json' => Http::response(['status' => 0], 404),
+            'https://world.openpetfoodfacts.org/api/v2/product/77770001.json' => Http::response(['status' => 0], 404),
+        ]);
+
+        $response = $this->post('/api/v1/scan/image', [
+            'image' => UploadedFile::fake()->image('bubly-variant.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.product.barcode', '77770001')
+            ->assertJsonPath('data.scan.scan_metadata.matched_by', 'image_visual_text_match');
     }
 
     protected function fakeBarcodeResponses(string $barcode, array $foodResponse): array

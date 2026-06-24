@@ -18,7 +18,8 @@ class ProductImageAnalysisService
         protected GoogleCloudVisionService $googleCloudVisionService,
         protected OpenAiProductImageIdentityService $openAiProductImageIdentityService,
         protected IngredientTextParserService $ingredientTextParserService,
-        protected NutritionTextParserService $nutritionTextParserService
+        protected NutritionTextParserService $nutritionTextParserService,
+        protected ProductImageSimilarityService $productImageSimilarityService
     ) {
     }
 
@@ -81,7 +82,7 @@ class ProductImageAnalysisService
         }
 
         $candidate = $this->matchLocalProductByNormalizedIdentity($signals)
-            ?? $this->matchLocalProductFromAliases($signals);
+            ?? $this->matchLocalProductFromAliases($signals, $imageBinary);
 
         if ($candidate !== null) {
             $product = $this->productAnalysisService->analyzeByBarcode($candidate['product']->barcode, $userId, $scan);
@@ -186,10 +187,18 @@ class ProductImageAnalysisService
             'document_lines' => is_array($visionOutput['document_lines'] ?? null)
                 ? $visionOutput['document_lines']
                 : [],
-            'product_name' => $this->nullableString($openAiOutput['product_name'] ?? null)
-                ?? $this->nullableString($visionOutput['product_name'] ?? null),
-            'brand' => $this->nullableString($openAiOutput['brand'] ?? null)
-                ?? $this->nullableString($visionOutput['brand'] ?? null),
+            'product_name' => $this->resolvePreferredIdentityField(
+                $openAiOutput['product_name'] ?? null,
+                $visionOutput['product_name'] ?? null,
+                $openAiOutput['confidence'] ?? null,
+                $visionOutput['confidence'] ?? null
+            ),
+            'brand' => $this->resolvePreferredIdentityField(
+                $openAiOutput['brand'] ?? null,
+                $visionOutput['brand'] ?? null,
+                $openAiOutput['confidence'] ?? null,
+                $visionOutput['confidence'] ?? null
+            ),
             'barcode_hint' => $this->nullableString($visionOutput['barcode_hint'] ?? null)
                 ?? $this->nullableString($openAiOutput['barcode_hint'] ?? null),
             'confidence' => max(
@@ -224,6 +233,56 @@ class ProductImageAnalysisService
             ->filter()
             ->unique()
             ->implode("\n");
+    }
+
+    protected function resolvePreferredIdentityField(
+        mixed $openAiValue,
+        mixed $visionValue,
+        mixed $openAiConfidence,
+        mixed $visionConfidence
+    ): ?string {
+        $openAiValue = $this->nullableString($openAiValue);
+        $visionValue = $this->nullableString($visionValue);
+
+        if ($openAiValue === null) {
+            return $visionValue;
+        }
+
+        if ($visionValue === null) {
+            return $openAiValue;
+        }
+
+        $normalizedOpenAi = $this->normalizeText($openAiValue);
+        $normalizedVision = $this->normalizeText($visionValue);
+
+        if ($normalizedOpenAi === $normalizedVision) {
+            return strlen($openAiValue) >= strlen($visionValue) ? $openAiValue : $visionValue;
+        }
+
+        if (
+            $normalizedOpenAi !== ''
+            && $normalizedVision !== ''
+            && (str_contains($normalizedOpenAi, $normalizedVision) || str_contains($normalizedVision, $normalizedOpenAi))
+        ) {
+            return strlen($openAiValue) >= strlen($visionValue) ? $openAiValue : $visionValue;
+        }
+
+        $openAiConfidence = is_numeric($openAiConfidence) ? (float) $openAiConfidence : 0.0;
+        $visionConfidence = is_numeric($visionConfidence) ? (float) $visionConfidence : 0.0;
+
+        if ($openAiConfidence >= 0.95 && $visionConfidence < 0.70) {
+            return $openAiValue;
+        }
+
+        if ($visionConfidence >= 0.70) {
+            return $visionValue;
+        }
+
+        if ($openAiConfidence >= 0.85) {
+            return $openAiValue;
+        }
+
+        return $visionValue;
     }
 
     protected function analysisSourceFromProvider(mixed $provider): string
@@ -305,7 +364,7 @@ class ProductImageAnalysisService
         ];
     }
 
-    protected function matchLocalProductFromAliases(array $signals): ?array
+    protected function matchLocalProductFromAliases(array $signals, string $imageBinary): ?array
     {
         $tokens = $this->searchTokens($signals);
 
@@ -314,7 +373,7 @@ class ProductImageAnalysisService
         }
 
         $products = Product::query()
-            ->with('barcodes')
+            ->with(['barcodes', 'images'])
             ->where(function ($builder) use ($tokens) {
                 foreach ($tokens as $token) {
                     $builder->orWhere('name', 'like', '%' . $token . '%')
@@ -324,20 +383,30 @@ class ProductImageAnalysisService
                         ->orWhereHas('barcodes', fn ($barcodeQuery) => $barcodeQuery->where('barcode', 'like', '%' . $token . '%'));
                 }
             })
-            ->limit(25)
+            ->limit(100)
             ->get();
 
         if ($products->isEmpty()) {
             return null;
         }
 
-        $ranked = $products->map(function (Product $product) use ($signals) {
+        $imageSimilarity = $this->productImageSimilarityService->scoreProductsAgainstImage($imageBinary, $products);
+
+        $ranked = $products->map(function (Product $product) use ($signals, $imageSimilarity) {
             $score = $this->aliasMatchScore($product, $signals);
+            $similarity = data_get($imageSimilarity, $product->id . '.similarity');
+
+            if (is_numeric($similarity)) {
+                $score += $this->imageSimilarityBoost((float) $similarity);
+            }
 
             return [
                 'product' => $product,
-                'matched_by' => 'image_alias_text_match',
+                'matched_by' => is_numeric($similarity) && (float) $similarity >= 0.9
+                    ? 'image_visual_text_match'
+                    : 'image_alias_text_match',
                 'confidence' => round(min(0.9, $score), 4),
+                'image_similarity' => is_numeric($similarity) ? round((float) $similarity, 4) : null,
             ];
         })->sortByDesc('confidence')->values();
 
@@ -380,19 +449,18 @@ class ProductImageAnalysisService
 
     protected function searchTokens(array $signals): Collection
     {
-        return collect([
-            $signals['product_name'] ?? null,
-            $signals['brand'] ?? null,
-            $signals['extracted_text'] ?? null,
-        ])->filter()
-            ->flatMap(function (string $value) {
-                preg_match_all('/[a-z0-9]{3,}/i', strtolower($value), $matches);
+        $priorityTokens = collect([
+            ...$this->tokenizeSearchText($signals['brand'] ?? null),
+            ...$this->tokenizeSearchText($signals['product_name'] ?? null),
+        ]);
 
-                return $matches[0] ?? [];
-            })
-            ->reject(fn ($token) => in_array($token, ['the', 'and', 'with', 'for', 'from', 'ingredients', 'nutrition', 'facts'], true))
+        $contextTokens = collect($this->tokenizeSearchText($signals['extracted_text'] ?? null))
+            ->reject(fn (string $token) => $priorityTokens->contains($token));
+
+        return $priorityTokens
+            ->merge($contextTokens)
             ->unique()
-            ->take(10)
+            ->take(20)
             ->values();
     }
 
@@ -437,7 +505,54 @@ class ProductImageAnalysisService
             }
         }
 
+        $signalTokens = $this->searchTokens($signals);
+        $aliasTokens = collect($this->catalogAliases($product))
+            ->flatMap(fn (string $alias) => $this->tokenizeSearchText($alias))
+            ->unique();
+
+        $sharedTokens = $signalTokens->intersect($aliasTokens)->count();
+        $score += min(0.2, $sharedTokens * 0.03);
+
         return min(1.0, $score);
+    }
+
+    protected function imageSimilarityBoost(float $similarity): float
+    {
+        return match (true) {
+            $similarity >= 0.98 => 0.35,
+            $similarity >= 0.95 => 0.28,
+            $similarity >= 0.90 => 0.2,
+            $similarity >= 0.85 => 0.12,
+            $similarity >= 0.80 => 0.06,
+            default => 0.0,
+        };
+    }
+
+    protected function tokenizeSearchText(?string $value): array
+    {
+        if ($value === null) {
+            return [];
+        }
+
+        preg_match_all('/[a-z0-9]{3,}/i', strtolower($value), $matches);
+
+        return collect($matches[0] ?? [])
+            ->map(fn ($token) => trim((string) $token))
+            ->filter()
+            ->reject(fn ($token) => in_array($token, $this->searchNoiseTokens(), true))
+            ->values()
+            ->all();
+    }
+
+    protected function searchNoiseTokens(): array
+    {
+        return [
+            'the', 'and', 'with', 'for', 'from', 'this', 'that', 'these', 'those',
+            'ingredients', 'ingredient', 'nutrition', 'nutritional', 'facts', 'fact',
+            'contains', 'common', 'kills', 'germs', 'moisturizers', 'moisturizer',
+            'bleach', 'free', 'ethyl', 'alcohol', 'label', 'serving', 'size',
+            'warning', 'directions', 'product', 'panel',
+        ];
     }
 
     protected function catalogAliases(Product $product): array
