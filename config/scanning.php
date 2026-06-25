@@ -15,8 +15,8 @@ return [
     'stale_after_days' => (int) env('SCAN_STALE_AFTER_DAYS', 30),
 
     'open_food_facts' => [
-        'timeout' => (int) env('OPENFOODFACTS_TIMEOUT', 10),
-        'retry_attempts' => (int) env('OPENFOODFACTS_RETRY_ATTEMPTS', 3),
+        'timeout' => (int) env('OPENFOODFACTS_TIMEOUT', 4),
+        'retry_attempts' => (int) env('OPENFOODFACTS_RETRY_ATTEMPTS', 1),
         'sources' => [
             [
                 'key' => 'open_food_facts',

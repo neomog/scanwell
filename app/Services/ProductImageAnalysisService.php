@@ -29,9 +29,16 @@ class ProductImageAnalysisService
         $imageBinary = (string) file_get_contents($image->getRealPath());
         $mimeType = $image->getMimeType() ?: 'image/jpeg';
 
-        $openAiOutput = $this->openAiProductImageIdentityService->extractFromImage($imageBinary, $mimeType);
         $visionOutput = $this->googleCloudVisionService->analyzeProductImage($imageBinary, $mimeType);
-        $ocrOutput = $this->mergeOcrOutputs($openAiOutput, $visionOutput);
+        $openAiOutput = null;
+
+        if (!$this->shouldUseVisionOnly($visionOutput)) {
+            $openAiOutput = $this->openAiProductImageIdentityService->extractFromImage($imageBinary, $mimeType);
+        }
+
+        $ocrOutput = $openAiOutput === null
+            ? $visionOutput
+            : $this->mergeOcrOutputs($openAiOutput, $visionOutput);
         $signals = $this->extractSignals($input, $ocrOutput ?? []);
         $this->storeDebugSignalsOnScan($scan, $storedImage, $ocrOutput, $signals);
 
@@ -297,6 +304,23 @@ class ProductImageAnalysisService
         };
     }
 
+    protected function shouldUseVisionOnly(?array $visionOutput): bool
+    {
+        if (!is_array($visionOutput) || $visionOutput === []) {
+            return false;
+        }
+
+        if ($this->nullableString($visionOutput['barcode_hint'] ?? null) !== null) {
+            return true;
+        }
+
+        $confidence = is_numeric($visionOutput['confidence'] ?? null) ? (float) $visionOutput['confidence'] : 0.0;
+        $hasProductName = $this->nullableString($visionOutput['product_name'] ?? null) !== null;
+        $hasBrand = $this->nullableString($visionOutput['brand'] ?? null) !== null;
+
+        return $confidence >= 0.88 && $hasProductName && $hasBrand;
+    }
+
     protected function resolveBarcode(?string $clientBarcodeHint, ?string $ocrBarcodeHint, ?string $extractedText): array
     {
         if ($clientBarcodeHint !== null) {
@@ -383,32 +407,44 @@ class ProductImageAnalysisService
                         ->orWhereHas('barcodes', fn ($barcodeQuery) => $barcodeQuery->where('barcode', 'like', '%' . $token . '%'));
                 }
             })
-            ->limit(100)
+            ->limit(60)
             ->get();
 
         if ($products->isEmpty()) {
             return null;
         }
 
-        $imageSimilarity = $this->productImageSimilarityService->scoreProductsAgainstImage($imageBinary, $products);
-
-        $ranked = $products->map(function (Product $product) use ($signals, $imageSimilarity) {
-            $score = $this->aliasMatchScore($product, $signals);
-            $similarity = data_get($imageSimilarity, $product->id . '.similarity');
-
-            if (is_numeric($similarity)) {
-                $score += $this->imageSimilarityBoost((float) $similarity);
-            }
-
+        $ranked = $products->map(function (Product $product) use ($signals) {
             return [
                 'product' => $product,
-                'matched_by' => is_numeric($similarity) && (float) $similarity >= 0.9
-                    ? 'image_visual_text_match'
-                    : 'image_alias_text_match',
-                'confidence' => round(min(0.9, $score), 4),
-                'image_similarity' => is_numeric($similarity) ? round((float) $similarity, 4) : null,
+                'matched_by' => 'image_alias_text_match',
+                'confidence' => round(min(0.9, $this->aliasMatchScore($product, $signals)), 4),
+                'image_similarity' => null,
             ];
         })->sortByDesc('confidence')->values();
+
+        if ($this->shouldApplyImageSimilarity($ranked)) {
+            $shortlist = $ranked
+                ->take(8)
+                ->pluck('product');
+
+            $imageSimilarity = $this->productImageSimilarityService->scoreProductsAgainstImage($imageBinary, $shortlist);
+
+            $ranked = $ranked->map(function (array $candidate) use ($imageSimilarity) {
+                $product = $candidate['product'];
+                $similarity = data_get($imageSimilarity, $product->id . '.similarity');
+
+                if (is_numeric($similarity)) {
+                    $candidate['confidence'] = round(min(0.9, $candidate['confidence'] + $this->imageSimilarityBoost((float) $similarity)), 4);
+                    $candidate['image_similarity'] = round((float) $similarity, 4);
+                    if ((float) $similarity >= 0.9) {
+                        $candidate['matched_by'] = 'image_visual_text_match';
+                    }
+                }
+
+                return $candidate;
+            })->sortByDesc('confidence')->values();
+        }
 
         $best = $ranked->first();
         $second = $ranked->get(1);
@@ -422,6 +458,21 @@ class ProductImageAnalysisService
         }
 
         return $best;
+    }
+
+    protected function shouldApplyImageSimilarity(Collection $ranked): bool
+    {
+        $best = $ranked->first();
+        $second = $ranked->get(1);
+
+        if ($best === null) {
+            return false;
+        }
+
+        $bestConfidence = (float) ($best['confidence'] ?? 0.0);
+        $secondConfidence = (float) ($second['confidence'] ?? 0.0);
+
+        return $bestConfidence < 0.82 || ($bestConfidence - $secondConfidence) < 0.12;
     }
 
     protected function nullableString(mixed $value): ?string

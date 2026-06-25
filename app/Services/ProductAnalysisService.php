@@ -26,7 +26,7 @@ class ProductAnalysisService
             $product = $this->productWorkflowService->findByBarcode($barcode);
 
             if ($product) {
-                if ($this->shouldRefreshProduct($product)) {
+                if ($this->shouldRefreshProductDuringInteractiveScan($product)) {
                     $this->updateProductFromApi($product, $scan);
                 }
             } else {
@@ -136,6 +136,19 @@ class ProductAnalysisService
         }
 
         return $product->updated_at->diffInDays(now()) > config('scanning.stale_after_days', 30);
+    }
+
+    protected function shouldRefreshProductDuringInteractiveScan(Product $product): bool
+    {
+        if (!$this->shouldRefreshProduct($product)) {
+            return false;
+        }
+
+        $hasIngredients = $product->ingredients()->exists() || filled($product->ingredients_text);
+        $hasNutrition = $product->nutrition()->exists();
+        $hasImage = filled($product->primary_image_url);
+
+        return !$hasIngredients || !$hasNutrition || !$hasImage;
     }
 
     protected function buildStoredRawData(array $catalogData, string $productFamily): array
