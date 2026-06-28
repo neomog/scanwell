@@ -40,6 +40,7 @@ class ProductResource extends JsonResource
             'category_name' => $this->category_name,
             'product_family' => $this->resolved_product_family,
             'source' => $this->source,
+            'sources' => data_get($this->raw_data, '_scanwell.contributing_sources', array_values(array_filter([$this->source]))),
             'ingredients_text' => $this->ingredients_text,
             'additives' => $this->additives ?? [],
             'allergens' => $this->allergens ?? [],

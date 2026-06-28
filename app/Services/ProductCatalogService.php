@@ -135,7 +135,7 @@ class ProductCatalogService
                 <=> [$left['confidence'], $left['completeness']];
         });
 
-        $bestCandidate = $candidates[0];
+        $bestCandidate = $this->enrichCandidate($candidates[0], array_slice($candidates, 1));
         $bestCandidate['lookup_summary'] = $this->lastLookupSummary;
 
         if ($bestCandidate['confidence'] < config('scanning.min_candidate_confidence', 45)) {
@@ -146,6 +146,90 @@ class ProductCatalogService
         $bestCandidate['lookup_summary'] = $this->lastLookupSummary;
 
         return $bestCandidate;
+    }
+
+    protected function enrichCandidate(array $primary, array $others): array
+    {
+        $enriched = $primary;
+        $contributingSources = array_values(array_unique(array_filter([
+            $primary['source'] ?? null,
+        ])));
+
+        foreach ($others as $candidate) {
+            if (empty($enriched['ingredients']) && !empty($candidate['ingredients'])) {
+                $enriched['ingredients'] = $candidate['ingredients'];
+                $contributingSources[] = $candidate['source'] ?? null;
+            }
+
+            if (!$this->hasNutritionData($enriched) && $this->hasNutritionData($candidate)) {
+                $enriched['nutrition'] = $candidate['nutrition'] ?? [];
+                $contributingSources[] = $candidate['source'] ?? null;
+            }
+
+            if (empty($enriched['image_url']) && !empty($candidate['image_url'])) {
+                $enriched['image_url'] = $candidate['image_url'];
+                $contributingSources[] = $candidate['source'] ?? null;
+            }
+
+            if (empty($enriched['brand']) && !empty($candidate['brand'])) {
+                $enriched['brand'] = $candidate['brand'];
+                $contributingSources[] = $candidate['source'] ?? null;
+            }
+
+            if (
+                (empty($enriched['name']) || $enriched['name'] === 'Unknown Product')
+                && !empty($candidate['name'])
+                && $candidate['name'] !== 'Unknown Product'
+            ) {
+                $enriched['name'] = $candidate['name'];
+                $contributingSources[] = $candidate['source'] ?? null;
+            }
+
+            if (empty(data_get($enriched, 'raw_data.categories')) && !empty(data_get($candidate, 'raw_data.categories'))) {
+                data_set($enriched, 'raw_data.categories', data_get($candidate, 'raw_data.categories'));
+                $contributingSources[] = $candidate['source'] ?? null;
+            }
+
+            if (empty(data_get($enriched, 'raw_data.categories_tags')) && !empty(data_get($candidate, 'raw_data.categories_tags'))) {
+                data_set($enriched, 'raw_data.categories_tags', data_get($candidate, 'raw_data.categories_tags'));
+                $contributingSources[] = $candidate['source'] ?? null;
+            }
+        }
+
+        $enriched['additives'] = collect($enriched['ingredients'] ?? [])
+            ->filter(function (array $ingredient): bool {
+                $name = strtolower(trim((string) ($ingredient['name'] ?? '')));
+
+                if ($name === '') {
+                    return false;
+                }
+
+                if ((bool) ($ingredient['is_additive'] ?? false)) {
+                    return true;
+                }
+
+                foreach (['lecithin', 'emulsifier', 'preserv', 'color', 'flavor', 'flavour', 'stabilizer'] as $keyword) {
+                    if (str_contains($name, $keyword)) {
+                        return true;
+                    }
+                }
+
+                return (bool) preg_match('/\be\d{3}\b/i', $name);
+            })
+            ->pluck('name')
+            ->values()
+            ->all();
+
+        $uniqueSources = array_values(array_unique(array_filter($contributingSources)));
+
+        if ($uniqueSources !== []) {
+            data_set($enriched, 'raw_data._scanwell.contributing_sources', $uniqueSources);
+        }
+
+        $enriched['completeness'] = $this->calculateCompleteness($enriched);
+        $enriched['confidence'] = $this->calculateConfidence($enriched, $enriched['completeness']);
+
+        return $enriched;
     }
 
     protected function normalizeCandidate(array $candidate, string $barcode, string $providerKey): ?array
