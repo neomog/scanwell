@@ -13,6 +13,16 @@ return [
     'sparse_cosmetic_score_cap' => (int) env('SCAN_SPARSE_COSMETIC_SCORE_CAP', 55),
     'water_plastic_score_cap' => (int) env('SCAN_WATER_PLASTIC_SCORE_CAP', 89),
     'stale_after_days' => (int) env('SCAN_STALE_AFTER_DAYS', 30),
+    'trusted_search_enrichment' => [
+        'enabled' => (bool) env('SCAN_TRUSTED_SEARCH_ENRICHMENT_ENABLED', true),
+        'page_size' => (int) env('SCAN_TRUSTED_SEARCH_PAGE_SIZE', 6),
+        'min_match_score' => (int) env('SCAN_TRUSTED_SEARCH_MIN_MATCH_SCORE', 80),
+    ],
+    'ai_catalog_enrichment' => [
+        'enabled' => (bool) env('SCAN_AI_CATALOG_ENRICHMENT_ENABLED', true),
+        'cache_ttl_minutes' => (int) env('SCAN_AI_CATALOG_ENRICHMENT_CACHE_TTL', 10080),
+        'image_download_timeout' => (int) env('SCAN_AI_CATALOG_IMAGE_TIMEOUT', 8),
+    ],
 
     'open_food_facts' => [
         'timeout' => (int) env('OPENFOODFACTS_TIMEOUT', 4),

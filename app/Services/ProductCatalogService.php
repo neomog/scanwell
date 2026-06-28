@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use App\Contracts\ProductCatalogImportProvider;
 use App\Contracts\ProductCatalogProvider;
 use App\Models\Scan;
 use App\Models\ScanProvider;
 use App\Models\ScanProviderLookup;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class ProductCatalogService
@@ -19,7 +22,10 @@ class ProductCatalogService
     ];
 
     public function __construct(
-        protected ProductFamilyResolver $productFamilyResolver
+        protected ProductFamilyResolver $productFamilyResolver,
+        protected OpenAiVisionService $openAiVisionService,
+        protected OpenAiIngredientLabelService $openAiIngredientLabelService,
+        protected OpenAiNutritionLabelService $openAiNutritionLabelService
     ) {
     }
 
@@ -136,6 +142,8 @@ class ProductCatalogService
         });
 
         $bestCandidate = $this->enrichCandidate($candidates[0], array_slice($candidates, 1));
+        $bestCandidate = $this->augmentCandidateFromTrustedSearch($bestCandidate, $productFamily);
+        $bestCandidate = $this->augmentCandidateFromImage($bestCandidate);
         $bestCandidate['lookup_summary'] = $this->lastLookupSummary;
 
         if ($bestCandidate['confidence'] < config('scanning.min_candidate_confidence', 45)) {
@@ -146,6 +154,479 @@ class ProductCatalogService
         $bestCandidate['lookup_summary'] = $this->lastLookupSummary;
 
         return $bestCandidate;
+    }
+
+    protected function augmentCandidateFromTrustedSearch(array $candidate, ?string $productFamily = null): array
+    {
+        if (!$this->shouldAugmentCandidateFromTrustedSearch($candidate)) {
+            return $candidate;
+        }
+
+        $searchCandidate = $this->findTrustedSearchCandidate($candidate, $productFamily);
+
+        if ($searchCandidate === null) {
+            return $candidate;
+        }
+
+        $augmented = $candidate;
+
+        foreach (['name', 'brand', 'image_url', 'page_url', 'ingredients_text', 'nutrition_text'] as $field) {
+            if (
+                (empty($augmented[$field]) || $augmented[$field] === 'Unknown Product')
+                && !empty($searchCandidate[$field])
+            ) {
+                $augmented[$field] = $searchCandidate[$field];
+            }
+        }
+
+        if (empty($augmented['ingredients']) && !empty($searchCandidate['ingredients'])) {
+            $augmented['ingredients'] = $searchCandidate['ingredients'];
+        }
+
+        if (empty($augmented['additives']) && !empty($searchCandidate['additives'])) {
+            $augmented['additives'] = $searchCandidate['additives'];
+        }
+
+        if (!$this->hasNutritionData($augmented) && $this->hasNutritionData($searchCandidate)) {
+            $augmented['nutrition'] = $searchCandidate['nutrition'] ?? [];
+        }
+
+        $contributingSources = array_values(array_unique(array_filter(array_merge(
+            data_get($augmented, 'raw_data._scanwell.contributing_sources', []),
+            [$searchCandidate['source'] ?? null]
+        ))));
+
+        if ($contributingSources !== []) {
+            data_set($augmented, 'raw_data._scanwell.contributing_sources', $contributingSources);
+        }
+
+        if (!empty($searchCandidate['page_url'])) {
+            data_set($augmented, 'raw_data._scanwell.trusted_search.page_url', $searchCandidate['page_url']);
+        }
+
+        data_set($augmented, 'raw_data._scanwell.trusted_search', array_merge(
+            data_get($augmented, 'raw_data._scanwell.trusted_search', []),
+            [
+                'source' => $searchCandidate['source'] ?? null,
+                'applied' => true,
+                'resolved_at' => now()->toIso8601String(),
+            ]
+        ));
+
+        $augmented['warnings'] = array_values(array_unique(array_filter(array_merge(
+            $augmented['warnings'] ?? [],
+            !empty($searchCandidate['warnings']) && is_array($searchCandidate['warnings']) ? $searchCandidate['warnings'] : []
+        ))));
+
+        $augmented['completeness'] = $this->calculateCompleteness($augmented);
+        $augmented['confidence'] = $this->calculateConfidence($augmented, $augmented['completeness']);
+
+        return $augmented;
+    }
+
+    protected function shouldAugmentCandidateFromTrustedSearch(array $candidate): bool
+    {
+        if (!config('scanning.trusted_search_enrichment.enabled', true)) {
+            return false;
+        }
+
+        if (filled(data_get($candidate, 'raw_data._scanwell.trusted_search.applied'))) {
+            return false;
+        }
+
+        $family = (string) ($candidate['product_type'] ?? ProductFamilyResolver::GENERAL);
+        $needsIngredients = empty($candidate['ingredients']);
+        $needsNutrition = in_array($family, [ProductFamilyResolver::FOOD, ProductFamilyResolver::PET_FOOD], true)
+            && !$this->hasNutritionData($candidate);
+        $needsIdentity = empty($candidate['brand'])
+            || empty($candidate['name'])
+            || ($candidate['name'] ?? null) === 'Unknown Product';
+
+        return $needsIngredients || $needsNutrition || $needsIdentity;
+    }
+
+    protected function findTrustedSearchCandidate(array $candidate, ?string $productFamily = null): ?array
+    {
+        $queries = $this->buildTrustedSearchQueries($candidate);
+
+        if ($queries === []) {
+            return null;
+        }
+
+        $family = $productFamily ?? ($candidate['product_type'] ?? null);
+        $candidates = [];
+
+        foreach ($this->activeProviders($family) as $providerRecord) {
+            $driver = app($providerRecord->driver);
+
+            if (!$driver instanceof ProductCatalogImportProvider) {
+                continue;
+            }
+
+            foreach ($queries as $query) {
+                try {
+                    $result = $driver->searchProducts(
+                        $query,
+                        1,
+                        (int) config('scanning.trusted_search_enrichment.page_size', 6),
+                        $this->buildProviderSettings($providerRecord),
+                        $providerRecord->credentials ?? []
+                    );
+                } catch (\Throwable $exception) {
+                    Log::warning('Trusted product search enrichment failed', [
+                        'provider_key' => $providerRecord->provider_key,
+                        'query' => $query,
+                        'barcode' => $candidate['barcode'] ?? null,
+                        'error' => $exception->getMessage(),
+                    ]);
+                    continue;
+                }
+
+                foreach ($result['products'] ?? [] as $searchResult) {
+                    if (!is_array($searchResult)) {
+                        continue;
+                    }
+
+                    $normalized = $this->normalizeCandidate(
+                        $searchResult,
+                        (string) ($candidate['barcode'] ?? ''),
+                        $providerRecord->provider_key
+                    );
+
+                    if ($normalized === null) {
+                        continue;
+                    }
+
+                    $normalized['search_match_score'] = $this->scoreTrustedSearchMatch($candidate, $normalized);
+                    $candidates[] = $normalized;
+                }
+
+                if ($candidates !== []) {
+                    break 2;
+                }
+            }
+        }
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        usort($candidates, function (array $left, array $right): int {
+            return [$right['search_match_score'] ?? 0, $right['confidence'], $right['completeness']]
+                <=> [$left['search_match_score'] ?? 0, $left['confidence'], $left['completeness']];
+        });
+
+        $best = $candidates[0];
+
+        if (($best['search_match_score'] ?? 0) < (int) config('scanning.trusted_search_enrichment.min_match_score', 80)) {
+            return null;
+        }
+
+        return $best;
+    }
+
+    protected function buildTrustedSearchQueries(array $candidate): array
+    {
+        $barcode = trim((string) ($candidate['barcode'] ?? ''));
+        $name = trim((string) ($candidate['name'] ?? ''));
+        $brand = trim((string) ($candidate['brand'] ?? ''));
+
+        return collect([
+            trim(implode(' ', array_filter([$barcode, $brand, $name]))),
+            trim(implode(' ', array_filter([$barcode, $name]))),
+            trim(implode(' ', array_filter([$brand, $name]))),
+            $barcode,
+            $name,
+        ])
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    protected function scoreTrustedSearchMatch(array $original, array $searchCandidate): int
+    {
+        $score = 0;
+
+        if (($searchCandidate['barcode'] ?? null) === ($original['barcode'] ?? null)) {
+            $score += 60;
+        }
+
+        $originalName = $this->normalizeLooseText((string) ($original['name'] ?? ''));
+        $searchName = $this->normalizeLooseText((string) ($searchCandidate['name'] ?? ''));
+        $originalBrand = $this->normalizeLooseText((string) ($original['brand'] ?? ''));
+        $searchBrand = $this->normalizeLooseText((string) ($searchCandidate['brand'] ?? ''));
+
+        if ($originalName !== '' && $searchName !== '') {
+            similar_text($originalName, $searchName, $namePct);
+            $score += (int) round($namePct * 0.25);
+        }
+
+        if ($originalBrand !== '' && $searchBrand !== '') {
+            similar_text($originalBrand, $searchBrand, $brandPct);
+            $score += (int) round($brandPct * 0.15);
+        }
+
+        if (!empty($searchCandidate['ingredients'])) {
+            $score += 5;
+        }
+
+        if ($this->hasNutritionData($searchCandidate)) {
+            $score += 5;
+        }
+
+        return min(100, $score);
+    }
+
+    protected function normalizeLooseText(string $value): string
+    {
+        $value = strtolower(trim($value));
+        $value = preg_replace('/[^a-z0-9]+/', ' ', $value) ?? '';
+
+        return trim($value);
+    }
+
+    protected function augmentCandidateFromImage(array $candidate): array
+    {
+        if (!$this->shouldAugmentCandidateFromImage($candidate)) {
+            return $candidate;
+        }
+
+        $cacheKey = 'scanwell:catalog:ai-enrichment:' . sha1(
+            implode('|', [
+                (string) ($candidate['barcode'] ?? ''),
+                (string) ($candidate['image_url'] ?? ''),
+                (string) ($candidate['source'] ?? ''),
+            ])
+        );
+
+        $delta = Cache::remember(
+            $cacheKey,
+            now()->addMinutes((int) config('scanning.ai_catalog_enrichment.cache_ttl_minutes', 10080)),
+            fn (): array => $this->buildImageAugmentationDelta($candidate)
+        );
+
+        if ($delta === []) {
+            return $candidate;
+        }
+
+        $augmented = $candidate;
+
+        foreach (['name', 'brand', 'image_url', 'ingredients_text', 'nutrition_text'] as $field) {
+            if (
+                (empty($augmented[$field]) || $augmented[$field] === 'Unknown Product')
+                && !empty($delta[$field])
+            ) {
+                $augmented[$field] = $delta[$field];
+            }
+        }
+
+        if (empty($augmented['ingredients']) && !empty($delta['ingredients'])) {
+            $augmented['ingredients'] = $delta['ingredients'];
+        }
+
+        if (!$this->hasNutritionData($augmented) && !empty($delta['nutrition'])) {
+            $augmented['nutrition'] = $delta['nutrition'];
+        }
+
+        if (empty($augmented['additives']) && !empty($delta['additives'])) {
+            $augmented['additives'] = $delta['additives'];
+        }
+
+        if (!empty($delta['raw_data']) && is_array($delta['raw_data'])) {
+            $augmented['raw_data'] = array_replace_recursive($augmented['raw_data'] ?? [], $delta['raw_data']);
+        }
+
+        $warnings = array_values(array_unique(array_filter(array_merge(
+            $augmented['warnings'] ?? [],
+            !empty($delta['applied']) ? ['Some missing product details were enriched from the product image.'] : []
+        ))));
+
+        $augmented['warnings'] = $warnings;
+        $augmented['completeness'] = $this->calculateCompleteness($augmented);
+        $augmented['confidence'] = $this->calculateConfidence($augmented, $augmented['completeness']);
+
+        return $augmented;
+    }
+
+    protected function shouldAugmentCandidateFromImage(array $candidate): bool
+    {
+        if (!config('scanning.ai_catalog_enrichment.enabled', true)) {
+            return false;
+        }
+
+        if (!filled(config('services.openai.api_key'))) {
+            return false;
+        }
+
+        if (!filled($candidate['image_url'] ?? null)) {
+            return false;
+        }
+
+        if (filled(data_get($candidate, 'raw_data._scanwell.ai_catalog_enrichment.applied'))) {
+            return false;
+        }
+
+        $family = (string) ($candidate['product_type'] ?? ProductFamilyResolver::GENERAL);
+        $needsIngredients = empty($candidate['ingredients']);
+        $needsNutrition = in_array($family, [ProductFamilyResolver::FOOD, ProductFamilyResolver::PET_FOOD], true)
+            && !$this->hasNutritionData($candidate);
+        $needsIdentity = empty($candidate['brand'])
+            || empty($candidate['name'])
+            || ($candidate['name'] ?? null) === 'Unknown Product';
+
+        return $needsIngredients || $needsNutrition || $needsIdentity;
+    }
+
+    protected function buildImageAugmentationDelta(array $candidate): array
+    {
+        $downloaded = $this->downloadImageForAugmentation((string) $candidate['image_url']);
+
+        if ($downloaded === null) {
+            return [];
+        }
+
+        $delta = [];
+        $applied = [];
+        $family = (string) ($candidate['product_type'] ?? ProductFamilyResolver::GENERAL);
+
+        if (empty($candidate['brand']) || empty($candidate['name']) || ($candidate['name'] ?? null) === 'Unknown Product') {
+            $identity = $this->openAiVisionService->analyzeProductImage(
+                $downloaded['binary'],
+                $downloaded['mime_type']
+            );
+
+            if (!empty($identity['product_name']) && (($candidate['name'] ?? null) === 'Unknown Product' || empty($candidate['name']))) {
+                $delta['name'] = $identity['product_name'];
+                $applied[] = 'name';
+            }
+
+            if (!empty($identity['brand']) && empty($candidate['brand'])) {
+                $delta['brand'] = $identity['brand'];
+                $applied[] = 'brand';
+            }
+
+            if ($identity !== null) {
+                data_set($delta, 'raw_data._scanwell.ai_catalog_enrichment.identity', [
+                    'analysis_source' => 'openai_vision',
+                    'confidence' => $identity['confidence'] ?? null,
+                    'front_label_visible' => $identity['front_label_visible'] ?? null,
+                    'ingredients_visible' => $identity['ingredients_visible'] ?? null,
+                    'nutrition_panel_visible' => $identity['nutrition_panel_visible'] ?? null,
+                ]);
+            }
+        }
+
+        if (empty($candidate['ingredients'])) {
+            $ingredientResult = $this->openAiIngredientLabelService->extractFromImage(
+                $downloaded['binary'],
+                $downloaded['mime_type']
+            );
+
+            if (!empty($ingredientResult['ingredients'])) {
+                $delta['ingredients'] = $ingredientResult['ingredients'];
+                $delta['ingredients_text'] = $ingredientResult['ingredients_text'] ?? null;
+                $delta['additives'] = $this->extractAdditivesFromIngredients($ingredientResult['ingredients']);
+                $applied[] = 'ingredients';
+
+                data_set($delta, 'raw_data._scanwell.ai_catalog_enrichment.ingredients', [
+                    'analysis_source' => $ingredientResult['analysis_source'] ?? 'openai_vision',
+                    'confidence' => $ingredientResult['confidence'] ?? null,
+                ]);
+            }
+        }
+
+        if (
+            in_array($family, [ProductFamilyResolver::FOOD, ProductFamilyResolver::PET_FOOD], true)
+            && !$this->hasNutritionData($candidate)
+        ) {
+            $nutritionResult = $this->openAiNutritionLabelService->extractFromImage(
+                $downloaded['binary'],
+                $downloaded['mime_type']
+            );
+
+            if (!empty($nutritionResult['nutrition'])) {
+                $delta['nutrition'] = $nutritionResult['nutrition'];
+                $delta['nutrition_text'] = $nutritionResult['nutrition_text'] ?? null;
+                $applied[] = 'nutrition';
+
+                data_set($delta, 'raw_data._scanwell.ai_catalog_enrichment.nutrition', [
+                    'analysis_source' => $nutritionResult['analysis_source'] ?? 'openai_vision',
+                    'confidence' => $nutritionResult['confidence'] ?? null,
+                ]);
+            }
+        }
+
+        if ($applied !== []) {
+            data_set($delta, 'raw_data._scanwell.ai_catalog_enrichment.applied', $applied);
+            data_set($delta, 'raw_data._scanwell.ai_catalog_enrichment.image_url', $candidate['image_url'] ?? null);
+        }
+
+        return $delta;
+    }
+
+    protected function downloadImageForAugmentation(string $imageUrl): ?array
+    {
+        try {
+            $response = Http::timeout((int) config('scanning.ai_catalog_enrichment.image_download_timeout', 8))
+                ->accept('image/*')
+                ->get($imageUrl);
+
+            if (!$response->successful()) {
+                return null;
+            }
+
+            $mimeType = strtolower(trim(explode(';', (string) $response->header('Content-Type', 'image/jpeg'))[0]));
+            if ($mimeType === '' || !str_starts_with($mimeType, 'image/')) {
+                return null;
+            }
+
+            $binary = $response->body();
+            if ($binary === '') {
+                return null;
+            }
+
+            return [
+                'binary' => $binary,
+                'mime_type' => $mimeType,
+            ];
+        } catch (\Throwable $exception) {
+            Log::warning('Failed to download provider image for AI catalog enrichment', [
+                'image_url' => $imageUrl,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    protected function extractAdditivesFromIngredients(array $ingredients): array
+    {
+        return collect($ingredients)
+            ->map(function ($ingredient): ?string {
+                if (is_array($ingredient)) {
+                    return isset($ingredient['name']) ? trim((string) $ingredient['name']) : null;
+                }
+
+                return is_string($ingredient) ? trim($ingredient) : null;
+            })
+            ->filter(function (?string $name): bool {
+                if (!$name) {
+                    return false;
+                }
+
+                $normalized = strtolower($name);
+
+                foreach (['lecithin', 'emulsifier', 'preserv', 'color', 'flavor', 'flavour', 'stabilizer'] as $keyword) {
+                    if (str_contains($normalized, $keyword)) {
+                        return true;
+                    }
+                }
+
+                return (bool) preg_match('/\be\d{3}\b/i', $normalized);
+            })
+            ->values()
+            ->all();
     }
 
     protected function enrichCandidate(array $primary, array $others): array

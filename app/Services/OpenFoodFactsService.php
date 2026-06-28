@@ -150,6 +150,7 @@ class OpenFoodFactsService implements ProductCatalogImportProvider, ProductCatal
             'brand' => $data['brands'] ?? $data['brand_owner'] ?? null,
             'category_id' => null,
             'image_url' => $data['image_url'] ?? $data['image_front_url'] ?? $data['image_front_small_url'] ?? null,
+            'page_url' => $this->resolveProductPageUrl((string) ($data['code'] ?? ''), $source),
             'source' => $source['key'] ?? 'open_facts',
             'product_type' => $source['family_hint'] ?? 'general',
             'ingredients' => $ingredients,
@@ -436,5 +437,28 @@ class OpenFoodFactsService implements ProductCatalogImportProvider, ProductCatal
             'status' => $status,
             'status_verbose' => $payload['status_verbose'] ?? null,
         ]);
+    }
+
+    protected function resolveProductPageUrl(string $barcode, array $source): ?string
+    {
+        $barcode = trim($barcode);
+
+        if ($barcode === '') {
+            return null;
+        }
+
+        $baseUrl = trim((string) ($source['base_url'] ?? ''));
+
+        if ($baseUrl === '') {
+            return null;
+        }
+
+        $publicBaseUrl = preg_replace('#/api(?:/v\d+)?/?$#i', '', rtrim($baseUrl, '/'));
+
+        if (!is_string($publicBaseUrl) || $publicBaseUrl === '') {
+            return null;
+        }
+
+        return $publicBaseUrl . '/product/' . rawurlencode($barcode);
     }
 }
