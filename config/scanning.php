@@ -1,10 +1,12 @@
 <?php
 
+use App\Services\EdamamFoodDatabaseService;
 use App\Services\OpenFoodFactsService;
 
 return [
     'providers' => [
         OpenFoodFactsService::class,
+        EdamamFoodDatabaseService::class,
     ],
 
     'min_candidate_confidence' => (int) env('SCAN_MIN_CANDIDATE_CONFIDENCE', 45),

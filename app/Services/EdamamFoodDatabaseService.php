@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Contracts\ProductCatalogImportProvider;
 use App\Contracts\ProductCatalogProvider;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\App;
@@ -9,7 +10,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-class EdamamFoodDatabaseService implements ProductCatalogProvider
+class EdamamFoodDatabaseService implements ProductCatalogImportProvider, ProductCatalogProvider
 {
     protected bool $verifySsl;
 
@@ -31,6 +32,10 @@ class EdamamFoodDatabaseService implements ProductCatalogProvider
             return null;
         }
 
+        if ($this->isTemporarilyThrottled()) {
+            throw new \RuntimeException('Edamam requests are temporarily paused after a rate-limit response.');
+        }
+
         $cacheKey = "scanwell:edamam:{$barcode}";
 
         return Cache::remember($cacheKey, now()->addMinutes($resolved['cache_ttl_minutes']), function () use ($barcode, $resolved) {
@@ -44,6 +49,12 @@ class EdamamFoodDatabaseService implements ProductCatalogProvider
                 ]);
 
                 if (!$response->successful()) {
+                    if ($response->status() === 429) {
+                        $this->markTemporarilyThrottled($resolved);
+
+                        throw new \RuntimeException('Edamam rate limit exceeded.');
+                    }
+
                     Log::warning('Edamam lookup failed', [
                         'barcode' => $barcode,
                         'status' => $response->status(),
@@ -61,6 +72,8 @@ class EdamamFoodDatabaseService implements ProductCatalogProvider
                 }
 
                 return $this->transformProduct($barcode, $candidate, $payload);
+            } catch (\RuntimeException $exception) {
+                throw $exception;
             } catch (\Throwable $exception) {
                 Log::error('Edamam integration failed', [
                     'barcode' => $barcode,
@@ -68,6 +81,98 @@ class EdamamFoodDatabaseService implements ProductCatalogProvider
                 ]);
 
                 return null;
+            }
+        });
+    }
+
+    public function searchProducts(
+        string $query,
+        int $page = 1,
+        int $pageSize = 20,
+        array $settings = [],
+        array $credentials = []
+    ): array {
+        $resolved = $this->resolveSettings($settings, $credentials);
+
+        if (blank($resolved['app_id']) || blank($resolved['app_key'])) {
+            return ['products' => [], 'total' => 0, 'page' => $page, 'page_count' => 0];
+        }
+
+        $query = trim($query);
+
+        if ($query === '') {
+            return ['products' => [], 'total' => 0, 'page' => $page, 'page_count' => 0];
+        }
+
+        if ($this->isTemporarilyThrottled()) {
+            throw new \RuntimeException('Edamam requests are temporarily paused after a rate-limit response.');
+        }
+
+        $cacheKey = 'scanwell:edamam:search:' . sha1($query . '|' . $page . '|' . $pageSize);
+
+        return Cache::remember($cacheKey, now()->addMinutes($resolved['cache_ttl_minutes']), function () use ($query, $page, $pageSize, $resolved) {
+            try {
+                $response = $this->createHttpClient($resolved)->get($resolved['base_url'], [
+                    'ingr' => $query,
+                    'app_id' => $resolved['app_id'],
+                    'app_key' => $resolved['app_key'],
+                    'category' => $resolved['category'],
+                    'nutrition-type' => $resolved['nutrition_type'],
+                ]);
+
+                if (!$response->successful()) {
+                    if ($response->status() === 429) {
+                        $this->markTemporarilyThrottled($resolved);
+
+                        throw new \RuntimeException('Edamam rate limit exceeded.');
+                    }
+
+                    Log::warning('Edamam search failed', [
+                        'query' => $query,
+                        'status' => $response->status(),
+                        'body' => $response->body(),
+                    ]);
+
+                    return ['products' => [], 'total' => 0, 'page' => $page, 'page_count' => 0];
+                }
+
+                $payload = $response->json();
+                $hints = collect($payload['hints'] ?? [])
+                    ->filter(fn ($hint) => is_array($hint))
+                    ->map(function (array $hint): ?array {
+                        $barcode = $this->extractBarcode($hint);
+
+                        if ($barcode === null) {
+                            return null;
+                        }
+
+                        return $this->transformProduct($barcode, $hint, ['hints' => [$hint]]);
+                    })
+                    ->filter()
+                    ->unique('barcode')
+                    ->values();
+
+                if ($page > 1) {
+                    return ['products' => [], 'total' => $hints->count(), 'page' => $page, 'page_count' => 1];
+                }
+
+                $products = $hints->take($pageSize)->all();
+
+                return [
+                    'products' => $products,
+                    'total' => $hints->count(),
+                    'page' => 1,
+                    'page_count' => 1,
+                ];
+            } catch (\RuntimeException $exception) {
+                throw $exception;
+            } catch (\Throwable $exception) {
+                Log::error('Edamam search integration failed', [
+                    'query' => $query,
+                    'error' => $exception->getMessage(),
+                ]);
+
+                return ['products' => [], 'total' => 0, 'page' => $page, 'page_count' => 0];
             }
         });
     }
@@ -251,5 +356,24 @@ class EdamamFoodDatabaseService implements ProductCatalogProvider
         }
 
         return null;
+    }
+
+    protected function isTemporarilyThrottled(): bool
+    {
+        return Cache::has($this->throttleCacheKey());
+    }
+
+    protected function markTemporarilyThrottled(array $settings): void
+    {
+        Cache::put(
+            $this->throttleCacheKey(),
+            true,
+            now()->addSeconds((int) ($settings['cooldown_seconds'] ?? config('services.edamam.cooldown_seconds', 60)))
+        );
+    }
+
+    protected function throttleCacheKey(): string
+    {
+        return 'scanwell:edamam:temporarily-throttled';
     }
 }

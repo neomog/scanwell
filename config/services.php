@@ -72,6 +72,7 @@ return [
         'nutrition_type' => env('EDAMAM_NUTRITION_TYPE', 'cooking'),
         'timeout' => env('EDAMAM_TIMEOUT', 10),
         'retry_attempts' => env('EDAMAM_RETRY_ATTEMPTS', 1),
+        'cooldown_seconds' => env('EDAMAM_COOLDOWN_SECONDS', 60),
     ],
 
     'gs1_us' => [

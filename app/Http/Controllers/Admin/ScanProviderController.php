@@ -252,17 +252,30 @@ class ScanProviderController extends Controller
 
     protected function buildProviderCredentials(ScanProvider $scanProvider, array $validated): array
     {
+        $existing = is_array($scanProvider->credentials) ? $scanProvider->credentials : [];
+
         return match ($scanProvider->provider_key) {
-            'edamam' => array_filter([
+            'edamam' => $this->mergeCredentialValues($existing, [
                 'app_id' => trim((string) ($validated['edamam_app_id'] ?? '')),
                 'app_key' => trim((string) ($validated['edamam_app_key'] ?? '')),
             ]),
-            'gs1_us' => array_filter([
+            'gs1_us' => $this->mergeCredentialValues($existing, [
                 'api_key' => trim((string) ($validated['gs1_us_api_key'] ?? '')),
                 'account_id' => trim((string) ($validated['gs1_us_account_id'] ?? '')),
-            ], fn ($value) => $value !== ''),
-            default => [],
+            ]),
+            default => $existing,
         };
+    }
+
+    protected function mergeCredentialValues(array $existing, array $incoming): array
+    {
+        foreach ($incoming as $key => $value) {
+            if ($value !== '') {
+                $existing[$key] = $value;
+            }
+        }
+
+        return array_filter($existing, fn ($value) => is_string($value) ? trim($value) !== '' : $value !== null);
     }
 
     protected function buildQualityMetrics(ScanProvider $provider): array

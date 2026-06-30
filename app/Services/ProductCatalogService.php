@@ -107,6 +107,10 @@ class ProductCatalogService
                 $attempts[] = $this->buildAttemptSummary($providerRecord, $lookup);
                 $candidates[] = $normalized;
                 $this->markProviderSuccess($providerRecord);
+
+                if ($this->shouldShortCircuitAfterCandidate($normalized)) {
+                    break;
+                }
             } else {
                 $lookup = $this->storeLookupAttempt(
                     $providerRecord,
@@ -263,6 +267,8 @@ class ProductCatalogService
                 continue;
             }
 
+            $providerMatched = false;
+
             foreach ($queries as $query) {
                 try {
                     $result = $driver->searchProducts(
@@ -299,10 +305,11 @@ class ProductCatalogService
 
                     $normalized['search_match_score'] = $this->scoreTrustedSearchMatch($candidate, $normalized);
                     $candidates[] = $normalized;
+                    $providerMatched = true;
                 }
 
-                if ($candidates !== []) {
-                    break 2;
+                if ($providerMatched) {
+                    break;
                 }
             }
         }
@@ -810,6 +817,24 @@ class ProductCatalogService
         }
 
         return max(0, min(100, $confidence));
+    }
+
+    protected function shouldShortCircuitAfterCandidate(array $candidate): bool
+    {
+        $family = (string) ($candidate['product_type'] ?? ProductFamilyResolver::GENERAL);
+        $hasIngredients = !empty($candidate['ingredients']);
+        $hasNutrition = $this->hasNutritionData($candidate);
+        $confidence = (int) ($candidate['confidence'] ?? 0);
+        $completeness = (int) ($candidate['completeness'] ?? 0);
+
+        if (in_array($family, [ProductFamilyResolver::FOOD, ProductFamilyResolver::PET_FOOD], true)) {
+            return $hasIngredients
+                && $hasNutrition
+                && $confidence >= 80
+                && $completeness >= 75;
+        }
+
+        return $confidence >= 80 && $completeness >= 60;
     }
 
     protected function hasNutritionData(array $candidate): bool
