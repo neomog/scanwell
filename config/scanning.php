@@ -2,11 +2,13 @@
 
 use App\Services\EdamamFoodDatabaseService;
 use App\Services\OpenFoodFactsService;
+use App\Services\UsdaFoodDataCentralService;
 
 return [
     'providers' => [
         OpenFoodFactsService::class,
         EdamamFoodDatabaseService::class,
+        UsdaFoodDataCentralService::class,
     ],
 
     'min_candidate_confidence' => (int) env('SCAN_MIN_CANDIDATE_CONFIDENCE', 45),

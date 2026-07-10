@@ -250,6 +250,62 @@
                                     </div>
                                 </div>
                             </section>
+                        @elseif($scanProvider->provider_key === 'openai_vision')
+                            <section class="space-y-4">
+                                <div>
+                                    <h4 class="text-base font-semibold text-slate-900">OpenAI Runtime</h4>
+                                    <p class="mt-1 text-sm text-slate-500">Configure the OpenAI key and model settings used for image identity, ingredient extraction, nutrition extraction, and catalog image enrichment.</p>
+                                </div>
+
+                                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                    <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 lg:col-span-2">
+                                        <label class="block text-sm font-medium text-slate-700 mb-2">Base URL</label>
+                                        <input type="url" name="openai_base_url" value="{{ old('openai_base_url', data_get($scanProvider->settings, 'base_url', 'https://api.openai.com/v1')) }}" class="w-full rounded-xl border-slate-300 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 lg:col-span-2">
+                                        <label class="block text-sm font-medium text-emerald-900 mb-2">API Key</label>
+                                        <input type="text" name="openai_api_key" value="{{ old('openai_api_key', data_get($scanProvider->credentials, 'api_key')) }}" class="w-full rounded-xl border-emerald-200 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                    <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                                        <label class="block text-sm font-medium text-slate-700 mb-2">Identity Model</label>
+                                        <input type="text" name="openai_image_recognition_model" value="{{ old('openai_image_recognition_model', data_get($scanProvider->settings, 'image_recognition_model', 'gpt-5.4-mini')) }}" class="w-full rounded-xl border-slate-300 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                    <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                                        <label class="block text-sm font-medium text-slate-700 mb-2">Ingredient Model</label>
+                                        <input type="text" name="openai_ingredient_extraction_model" value="{{ old('openai_ingredient_extraction_model', data_get($scanProvider->settings, 'ingredient_extraction_model', 'gpt-5.4-mini')) }}" class="w-full rounded-xl border-slate-300 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                    <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                                        <label class="block text-sm font-medium text-slate-700 mb-2">Nutrition Model</label>
+                                        <input type="text" name="openai_nutrition_extraction_model" value="{{ old('openai_nutrition_extraction_model', data_get($scanProvider->settings, 'nutrition_extraction_model', 'gpt-5.4-mini')) }}" class="w-full rounded-xl border-slate-300 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                </div>
+                            </section>
+                        @elseif($scanProvider->provider_key === 'google_cloud_vision')
+                            <section class="space-y-4">
+                                <div>
+                                    <h4 class="text-base font-semibold text-slate-900">Google Cloud Vision Runtime</h4>
+                                    <p class="mt-1 text-sm text-slate-500">Configure OCR credentials for photo and gallery scans. You can store a server file path or paste the service-account JSON directly.</p>
+                                </div>
+
+                                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                    <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                                        <label class="block text-sm font-medium text-slate-700 mb-2">Vision Base URL</label>
+                                        <input type="url" name="google_cloud_vision_base_url" value="{{ old('google_cloud_vision_base_url', data_get($scanProvider->settings, 'base_url', 'https://vision.googleapis.com/v1')) }}" class="w-full rounded-xl border-slate-300 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                    <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                                        <label class="block text-sm font-medium text-slate-700 mb-2">Token URL</label>
+                                        <input type="url" name="google_cloud_vision_token_url" value="{{ old('google_cloud_vision_token_url', data_get($scanProvider->settings, 'token_url', 'https://oauth2.googleapis.com/token')) }}" class="w-full rounded-xl border-slate-300 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 lg:col-span-2">
+                                        <label class="block text-sm font-medium text-emerald-900 mb-2">Credentials Path</label>
+                                        <input type="text" name="google_cloud_vision_credentials_path" value="{{ old('google_cloud_vision_credentials_path', data_get($scanProvider->credentials, 'credentials_path')) }}" class="w-full rounded-xl border-emerald-200 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]" placeholder="/path/to/service-account.json">
+                                    </div>
+                                    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 lg:col-span-2">
+                                        <label class="block text-sm font-medium text-emerald-900 mb-2">Credentials JSON</label>
+                                        <textarea name="google_cloud_vision_credentials_json" rows="8" class="w-full rounded-xl border-emerald-200 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]" placeholder='{"type":"service_account",...}'>{{ old('google_cloud_vision_credentials_json', data_get($scanProvider->credentials, 'credentials_json')) }}</textarea>
+                                    </div>
+                                </div>
+                            </section>
                         @elseif($scanProvider->provider_key === 'edamam')
                             <section class="space-y-4">
                                 <div>
@@ -277,6 +333,29 @@
                                     <div class="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4">
                                         <label class="block text-sm font-medium text-emerald-900 mb-2">App Key</label>
                                         <input type="text" name="edamam_app_key" value="{{ old('edamam_app_key', data_get($scanProvider->credentials, 'app_key')) }}" class="w-full rounded-xl border-emerald-200 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                </div>
+                            </section>
+                        @elseif($scanProvider->provider_key === 'usda_fdc')
+                            <section class="space-y-4">
+                                <div>
+                                    <h4 class="text-base font-semibold text-slate-900">Search Endpoint & API Key</h4>
+                                    <p class="mt-1 text-sm text-slate-500">USDA is used as a branded-food enrichment and import source. It stays food-only and search-based, so it does not replace the primary barcode-verification flow.</p>
+                                </div>
+
+                                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                    <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 lg:col-span-2">
+                                        <label class="block text-sm font-medium text-slate-700 mb-2">Search Endpoint URL</label>
+                                        <input type="url" name="usda_fdc_base_url" value="{{ old('usda_fdc_base_url', data_get($scanProvider->settings, 'base_url', 'https://api.nal.usda.gov/fdc/v1/foods/search')) }}" class="w-full rounded-xl border-slate-300 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]">
+                                    </div>
+                                    <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                                        <label class="block text-sm font-medium text-slate-700 mb-2">Data Types</label>
+                                        <input type="text" name="usda_fdc_data_types" value="{{ old('usda_fdc_data_types', implode(', ', (array) data_get($scanProvider->settings, 'data_types', ['Branded']))) }}" class="w-full rounded-xl border-slate-300 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]" placeholder="Branded">
+                                        <p class="mt-2 text-xs text-slate-500">Comma-separated. `Branded` is the recommended default for packaged products.</p>
+                                    </div>
+                                    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4">
+                                        <label class="block text-sm font-medium text-emerald-900 mb-2">API Key</label>
+                                        <input type="text" name="usda_fdc_api_key" value="{{ old('usda_fdc_api_key', data_get($scanProvider->credentials, 'api_key')) }}" class="w-full rounded-xl border-emerald-200 bg-white focus:border-[#1FA774] focus:ring-[#1FA774]">
                                     </div>
                                 </div>
                             </section>

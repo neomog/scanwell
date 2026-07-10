@@ -8,15 +8,26 @@ use Illuminate\Support\Facades\Log;
 
 class GoogleCloudVisionService
 {
+    public function __construct(
+        protected ScanProviderRuntimeConfigService $runtimeConfig
+    ) {
+    }
+
     public function analyzeProductImage(string $imageBinary, string $mimeType = 'image/jpeg'): ?array
     {
-        $credentials = $this->resolveCredentials();
+        $settings = $this->runtimeConfig->googleCloudVision();
+
+        if (!(bool) ($settings['is_active'] ?? true)) {
+            return null;
+        }
+
+        $credentials = $this->resolveCredentials($settings);
 
         if ($credentials === null) {
             return null;
         }
 
-        $accessToken = $this->accessToken($credentials);
+        $accessToken = $this->accessToken($credentials, $settings);
 
         if ($accessToken === null) {
             return null;
@@ -36,8 +47,9 @@ class GoogleCloudVisionService
         try {
             $response = Http::withToken($accessToken)
                 ->acceptJson()
-                ->timeout((int) config('services.google_cloud_vision.timeout', 30))
-                ->post(rtrim((string) config('services.google_cloud_vision.base_url', 'https://vision.googleapis.com/v1'), '/') . '/images:annotate', $payload);
+                ->retry((int) ($settings['retry_attempts'] ?? 1), 200)
+                ->timeout((int) ($settings['timeout'] ?? 30))
+                ->post(rtrim((string) ($settings['base_url'] ?? 'https://vision.googleapis.com/v1'), '/') . '/images:annotate', $payload);
 
             if (!$response->successful()) {
                 Log::warning('Google Cloud Vision OCR request failed', [
@@ -82,16 +94,18 @@ class GoogleCloudVisionService
         ];
     }
 
-    protected function accessToken(array $credentials): ?string
+    protected function accessToken(array $credentials, ?array $settings = null): ?string
     {
+        $settings ??= $this->runtimeConfig->googleCloudVision();
         $cacheKey = 'scanwell:google-cloud-vision:token:' . sha1(($credentials['client_email'] ?? '') . '|' . ($credentials['private_key_id'] ?? ''));
 
-        return Cache::remember($cacheKey, now()->addMinutes(50), function () use ($credentials) {
+        return Cache::remember($cacheKey, now()->addMinutes(50), function () use ($credentials, $settings) {
             try {
                 $response = Http::asForm()
                     ->acceptJson()
-                    ->timeout((int) config('services.google_cloud_vision.timeout', 30))
-                    ->post((string) config('services.google_cloud_vision.token_url', 'https://oauth2.googleapis.com/token'), [
+                    ->retry((int) ($settings['retry_attempts'] ?? 1), 200)
+                    ->timeout((int) ($settings['timeout'] ?? 30))
+                    ->post((string) ($settings['token_url'] ?? 'https://oauth2.googleapis.com/token'), [
                         'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
                         'assertion' => $this->buildJwtAssertion($credentials),
                     ]);
@@ -129,7 +143,7 @@ class GoogleCloudVisionService
         $claims = $this->base64UrlEncode(json_encode([
             'iss' => $credentials['client_email'],
             'scope' => 'https://www.googleapis.com/auth/cloud-platform',
-            'aud' => (string) config('services.google_cloud_vision.token_url', 'https://oauth2.googleapis.com/token'),
+            'aud' => (string) ($this->runtimeConfig->googleCloudVision()['token_url'] ?? 'https://oauth2.googleapis.com/token'),
             'iat' => $issuedAt,
             'exp' => $expiresAt,
         ], JSON_THROW_ON_ERROR));
@@ -146,10 +160,11 @@ class GoogleCloudVisionService
         return $unsignedToken . '.' . $this->base64UrlEncode($signature);
     }
 
-    protected function resolveCredentials(): ?array
+    protected function resolveCredentials(?array $settings = null): ?array
     {
-        $inlineJson = $this->nullableString(config('services.google_cloud_vision.credentials_json'));
-        $credentialsPath = $this->nullableString(config('services.google_cloud_vision.credentials_path'));
+        $settings ??= $this->runtimeConfig->googleCloudVision();
+        $inlineJson = $this->nullableString($settings['credentials_json'] ?? null);
+        $credentialsPath = $this->nullableString($settings['credentials_path'] ?? null);
 
         if ($inlineJson !== null) {
             $decoded = json_decode($inlineJson, true);

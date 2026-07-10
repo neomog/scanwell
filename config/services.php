@@ -75,6 +75,18 @@ return [
         'cooldown_seconds' => env('EDAMAM_COOLDOWN_SECONDS', 60),
     ],
 
+    'usda_fdc' => [
+        'base_url' => env('USDA_FDC_BASE_URL', 'https://api.nal.usda.gov/fdc/v1/foods/search'),
+        'api_key' => env('USDA_FDC_API_KEY'),
+        'data_types' => array_values(array_filter(array_map(
+            static fn (string $value): string => trim($value),
+            preg_split('/[\r\n,;]+/', (string) env('USDA_FDC_DATA_TYPES', 'Branded')) ?: []
+        ))),
+        'timeout' => env('USDA_FDC_TIMEOUT', 10),
+        'retry_attempts' => env('USDA_FDC_RETRY_ATTEMPTS', 1),
+        'cooldown_seconds' => env('USDA_FDC_COOLDOWN_SECONDS', 3600),
+    ],
+
     'gs1_us' => [
         'base_url' => env('GS1_US_BASE_URL'),
         'api_key' => env('GS1_US_API_KEY'),
@@ -92,12 +104,14 @@ return [
         'credentials_path' => env('GOOGLE_CLOUD_VISION_CREDENTIALS_PATH'),
         'credentials_json' => env('GOOGLE_CLOUD_VISION_CREDENTIALS_JSON'),
         'timeout' => env('GOOGLE_CLOUD_VISION_TIMEOUT', 30),
+        'retry_attempts' => env('GOOGLE_CLOUD_VISION_RETRY_ATTEMPTS', 1),
     ],
 
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
         'timeout' => env('OPENAI_TIMEOUT', 30),
+        'retry_attempts' => env('OPENAI_RETRY_ATTEMPTS', 1),
         'image_recognition_model' => env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini'),
         'ingredient_extraction_model' => env('OPENAI_INGREDIENT_EXTRACTION_MODEL', env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini')),
         'nutrition_extraction_model' => env('OPENAI_NUTRITION_EXTRACTION_MODEL', env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini')),

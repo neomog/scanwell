@@ -25,7 +25,8 @@ class ProductCatalogService
         protected ProductFamilyResolver $productFamilyResolver,
         protected OpenAiVisionService $openAiVisionService,
         protected OpenAiIngredientLabelService $openAiIngredientLabelService,
-        protected OpenAiNutritionLabelService $openAiNutritionLabelService
+        protected OpenAiNutritionLabelService $openAiNutritionLabelService,
+        protected ScanProviderRuntimeConfigService $runtimeConfig
     ) {
     }
 
@@ -39,14 +40,39 @@ class ProductCatalogService
             $candidate = null;
             $error = null;
             $status = 'not_found';
-            $driver = $this->resolveDriver($providerRecord);
+            $providerInstance = null;
 
-            if ($driver === null) {
+            try {
+                $providerInstance = app($providerRecord->driver);
+            } catch (\Throwable $exception) {
+                $status = 'error';
+                $error = 'Configured provider driver could not be resolved.';
+
+                Log::error('Scan provider driver resolution failed', [
+                    'provider_key' => $providerRecord->provider_key,
+                    'barcode' => $barcode,
+                    'driver' => $providerRecord->driver,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+
+            if (
+                $providerInstance instanceof ProductCatalogImportProvider
+                && !$providerInstance instanceof ProductCatalogProvider
+            ) {
+                continue;
+            }
+
+            if ($this->isRuntimeOnlyScanProvider($providerRecord)) {
+                continue;
+            }
+
+            if (!$providerInstance instanceof ProductCatalogProvider) {
                 $status = 'error';
                 $error = 'Configured provider driver does not implement ProductCatalogProvider.';
             } else {
                 try {
-                    $candidate = $driver->findByBarcode(
+                    $candidate = $providerInstance->findByBarcode(
                         $barcode,
                         $this->buildProviderSettings($providerRecord),
                         $providerRecord->credentials ?? []
@@ -137,7 +163,22 @@ class ProductCatalogService
         ];
 
         if ($candidates === []) {
-            return null;
+            $fallbackCandidate = $this->findTrustedSearchFallbackByBarcode($barcode, $productFamily);
+
+            if ($fallbackCandidate === null) {
+                return null;
+            }
+
+            $fallbackCandidate['lookup_summary'] = $this->lastLookupSummary;
+
+            if ($fallbackCandidate['confidence'] < config('scanning.min_candidate_confidence', 45)) {
+                return null;
+            }
+
+            $this->lastLookupSummary['resolved'] = true;
+            $fallbackCandidate['lookup_summary'] = $this->lastLookupSummary;
+
+            return $fallbackCandidate;
         }
 
         usort($candidates, function (array $left, array $right): int {
@@ -173,26 +214,31 @@ class ProductCatalogService
         }
 
         $augmented = $candidate;
+        $appliedFields = [];
 
-        foreach (['name', 'brand', 'image_url', 'page_url', 'ingredients_text', 'nutrition_text'] as $field) {
+        foreach ($this->trustedSearchScalarFieldsToMerge($searchCandidate) as $field) {
             if (
                 (empty($augmented[$field]) || $augmented[$field] === 'Unknown Product')
                 && !empty($searchCandidate[$field])
             ) {
                 $augmented[$field] = $searchCandidate[$field];
+                $appliedFields[] = $field;
             }
         }
 
         if (empty($augmented['ingredients']) && !empty($searchCandidate['ingredients'])) {
             $augmented['ingredients'] = $searchCandidate['ingredients'];
+            $appliedFields[] = 'ingredients';
         }
 
         if (empty($augmented['additives']) && !empty($searchCandidate['additives'])) {
             $augmented['additives'] = $searchCandidate['additives'];
+            $appliedFields[] = 'additives';
         }
 
         if (!$this->hasNutritionData($augmented) && $this->hasNutritionData($searchCandidate)) {
             $augmented['nutrition'] = $searchCandidate['nutrition'] ?? [];
+            $appliedFields[] = 'nutrition';
         }
 
         $contributingSources = array_values(array_unique(array_filter(array_merge(
@@ -214,6 +260,9 @@ class ProductCatalogService
                 'source' => $searchCandidate['source'] ?? null,
                 'applied' => true,
                 'resolved_at' => now()->toIso8601String(),
+                'applied_fields' => array_values(array_unique($appliedFields)),
+                'merge_policy' => $this->trustedSearchMergePolicy($searchCandidate),
+                'search_match_score' => $searchCandidate['search_match_score'] ?? null,
             ]
         ));
 
@@ -251,19 +300,33 @@ class ProductCatalogService
 
     protected function findTrustedSearchCandidate(array $candidate, ?string $productFamily = null): ?array
     {
-        $queries = $this->buildTrustedSearchQueries($candidate);
-
-        if ($queries === []) {
-            return null;
-        }
-
         $family = $productFamily ?? ($candidate['product_type'] ?? null);
         $candidates = [];
 
         foreach ($this->activeProviders($family) as $providerRecord) {
-            $driver = app($providerRecord->driver);
+            try {
+                $driver = app($providerRecord->driver);
+            } catch (\Throwable $exception) {
+                Log::warning('Trusted product search provider could not be resolved', [
+                    'provider_key' => $providerRecord->provider_key,
+                    'driver' => $providerRecord->driver,
+                    'barcode' => $candidate['barcode'] ?? null,
+                    'error' => $exception->getMessage(),
+                ]);
+                continue;
+            }
 
             if (!$driver instanceof ProductCatalogImportProvider) {
+                continue;
+            }
+
+            if (!$this->shouldQueryTrustedSearchProvider($candidate, $providerRecord)) {
+                continue;
+            }
+
+            $queries = $this->buildTrustedSearchQueriesForProvider($candidate, $providerRecord);
+
+            if ($queries === []) {
                 continue;
             }
 
@@ -304,6 +367,11 @@ class ProductCatalogService
                     }
 
                     $normalized['search_match_score'] = $this->scoreTrustedSearchMatch($candidate, $normalized);
+
+                    if (!$this->shouldAcceptTrustedSearchCandidate($candidate, $normalized, $providerRecord)) {
+                        continue;
+                    }
+
                     $candidates[] = $normalized;
                     $providerMatched = true;
                 }
@@ -325,11 +393,156 @@ class ProductCatalogService
 
         $best = $candidates[0];
 
-        if (($best['search_match_score'] ?? 0) < (int) config('scanning.trusted_search_enrichment.min_match_score', 80)) {
+        if (($best['search_match_score'] ?? 0) < $this->minimumTrustedSearchMatchScore($best)) {
             return null;
         }
 
         return $best;
+    }
+
+    protected function findTrustedSearchFallbackByBarcode(string $barcode, ?string $productFamily = null): ?array
+    {
+        $barcode = trim($barcode);
+
+        if ($barcode === '' || !config('scanning.trusted_search_enrichment.enabled', true)) {
+            return null;
+        }
+
+        $seed = [
+            'barcode' => $barcode,
+            'name' => 'Unknown Product',
+            'brand' => null,
+            'product_type' => $productFamily ?? ProductFamilyResolver::GENERAL,
+            'ingredients' => [],
+            'nutrition' => [],
+        ];
+
+        $candidates = [];
+
+        foreach ($this->activeProviders($productFamily) as $providerRecord) {
+            if ($providerRecord->provider_key !== 'usda_fdc') {
+                continue;
+            }
+
+            try {
+                $driver = app($providerRecord->driver);
+            } catch (\Throwable $exception) {
+                Log::warning('Trusted barcode fallback provider could not be resolved', [
+                    'provider_key' => $providerRecord->provider_key,
+                    'driver' => $providerRecord->driver,
+                    'barcode' => $barcode,
+                    'error' => $exception->getMessage(),
+                ]);
+                continue;
+            }
+
+            if (!$driver instanceof ProductCatalogImportProvider) {
+                continue;
+            }
+
+            try {
+                $result = $driver->searchProducts(
+                    $barcode,
+                    1,
+                    (int) config('scanning.trusted_search_enrichment.page_size', 6),
+                    $this->buildProviderSettings($providerRecord),
+                    $providerRecord->credentials ?? []
+                );
+            } catch (\Throwable $exception) {
+                Log::warning('Trusted barcode fallback search failed', [
+                    'provider_key' => $providerRecord->provider_key,
+                    'barcode' => $barcode,
+                    'error' => $exception->getMessage(),
+                ]);
+                continue;
+            }
+
+            foreach ($result['products'] ?? [] as $searchResult) {
+                if (!is_array($searchResult)) {
+                    continue;
+                }
+
+                $normalized = $this->normalizeCandidate(
+                    $searchResult,
+                    $barcode,
+                    $providerRecord->provider_key
+                );
+
+                if ($normalized === null) {
+                    continue;
+                }
+
+                $normalized['search_match_score'] = $this->scoreTrustedSearchMatch($seed, $normalized);
+
+                if (!$this->shouldAcceptTrustedSearchCandidate($seed, $normalized, $providerRecord)) {
+                    continue;
+                }
+
+                data_set($normalized, 'raw_data._scanwell.trusted_search', [
+                    'source' => $normalized['source'] ?? $providerRecord->provider_key,
+                    'applied' => true,
+                    'fallback_only' => true,
+                    'resolved_at' => now()->toIso8601String(),
+                    'merge_policy' => $this->trustedSearchMergePolicy($normalized),
+                    'search_match_score' => $normalized['search_match_score'] ?? null,
+                    'applied_fields' => $this->trustedSearchAppliedFields($normalized),
+                ]);
+
+                $candidates[] = $normalized;
+            }
+        }
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        usort($candidates, function (array $left, array $right): int {
+            return [$right['search_match_score'] ?? 0, $right['confidence'], $right['completeness']]
+                <=> [$left['search_match_score'] ?? 0, $left['confidence'], $left['completeness']];
+        });
+
+        return $candidates[0];
+    }
+
+    protected function shouldQueryTrustedSearchProvider(array $candidate, ScanProvider $providerRecord): bool
+    {
+        if ($providerRecord->provider_key !== 'usda_fdc') {
+            return true;
+        }
+
+        $barcode = trim((string) ($candidate['barcode'] ?? ''));
+
+        if ($barcode === '') {
+            return false;
+        }
+
+        return empty($candidate['ingredients']) || !$this->hasNutritionData($candidate);
+    }
+
+    protected function buildTrustedSearchQueriesForProvider(array $candidate, ScanProvider $providerRecord): array
+    {
+        if ($providerRecord->provider_key !== 'usda_fdc') {
+            return $this->buildTrustedSearchQueries($candidate);
+        }
+
+        $barcode = trim((string) ($candidate['barcode'] ?? ''));
+        $name = trim((string) ($candidate['name'] ?? ''));
+        $brand = trim((string) ($candidate['brand'] ?? ''));
+
+        if ($barcode === '') {
+            return [];
+        }
+
+        return collect([
+            trim(implode(' ', array_filter([$barcode, $brand, $name]))),
+            trim(implode(' ', array_filter([$barcode, $name]))),
+            trim(implode(' ', array_filter([$barcode, $brand]))),
+            $barcode,
+        ])
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     protected function buildTrustedSearchQueries(array $candidate): array
@@ -383,6 +596,104 @@ class ProductCatalogService
         }
 
         return min(100, $score);
+    }
+
+    protected function shouldAcceptTrustedSearchCandidate(
+        array $original,
+        array $searchCandidate,
+        ScanProvider $providerRecord
+    ): bool {
+        if ($providerRecord->provider_key !== 'usda_fdc') {
+            return ($searchCandidate['search_match_score'] ?? 0) >= $this->minimumTrustedSearchMatchScore($searchCandidate);
+        }
+
+        if (!$this->trustedSearchSourceBarcodeMatches($original, $searchCandidate, 'raw_data.food.gtinUpc')) {
+            return false;
+        }
+
+        if (empty($searchCandidate['ingredients']) && !$this->hasNutritionData($searchCandidate)) {
+            return false;
+        }
+
+        return ($searchCandidate['search_match_score'] ?? 0) >= $this->minimumTrustedSearchMatchScore($searchCandidate);
+    }
+
+    protected function minimumTrustedSearchMatchScore(array $searchCandidate): int
+    {
+        $providerKey = (string) ($searchCandidate['provider'] ?? $searchCandidate['source'] ?? '');
+
+        if ($providerKey === 'usda_fdc') {
+            return 65;
+        }
+
+        return (int) config('scanning.trusted_search_enrichment.min_match_score', 80);
+    }
+
+    protected function trustedSearchSourceBarcodeMatches(
+        array $original,
+        array $searchCandidate,
+        string $sourcePath
+    ): bool {
+        $originalBarcode = $this->normalizeTrustedSearchBarcode($original['barcode'] ?? null);
+        $sourceBarcode = $this->normalizeTrustedSearchBarcode(data_get($searchCandidate, $sourcePath));
+
+        return $originalBarcode !== null && $originalBarcode === $sourceBarcode;
+    }
+
+    protected function normalizeTrustedSearchBarcode(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = preg_replace('/\D+/', '', (string) $value);
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    protected function trustedSearchScalarFieldsToMerge(array $searchCandidate): array
+    {
+        $providerKey = (string) ($searchCandidate['provider'] ?? $searchCandidate['source'] ?? '');
+
+        if ($providerKey === 'usda_fdc') {
+            return ['ingredients_text', 'nutrition_text'];
+        }
+
+        return ['name', 'brand', 'image_url', 'page_url', 'ingredients_text', 'nutrition_text'];
+    }
+
+    protected function trustedSearchMergePolicy(array $searchCandidate): string
+    {
+        $providerKey = (string) ($searchCandidate['provider'] ?? $searchCandidate['source'] ?? '');
+
+        return $providerKey === 'usda_fdc'
+            ? 'ingredients_nutrition_only'
+            : 'standard';
+    }
+
+    protected function trustedSearchAppliedFields(array $searchCandidate): array
+    {
+        $fields = [];
+
+        foreach ($this->trustedSearchScalarFieldsToMerge($searchCandidate) as $field) {
+            if (!empty($searchCandidate[$field])) {
+                $fields[] = $field;
+            }
+        }
+
+        if (!empty($searchCandidate['ingredients'])) {
+            $fields[] = 'ingredients';
+        }
+
+        if (!empty($searchCandidate['additives'])) {
+            $fields[] = 'additives';
+        }
+
+        if ($this->hasNutritionData($searchCandidate)) {
+            $fields[] = 'nutrition';
+        }
+
+        return array_values(array_unique($fields));
     }
 
     protected function normalizeLooseText(string $value): string
@@ -462,7 +773,9 @@ class ProductCatalogService
             return false;
         }
 
-        if (!filled(config('services.openai.api_key'))) {
+        $openAiSettings = $this->runtimeConfig->openAi();
+
+        if (!(bool) ($openAiSettings['is_active'] ?? true) || !filled($openAiSettings['api_key'] ?? null)) {
             return false;
         }
 
@@ -483,6 +796,14 @@ class ProductCatalogService
             || ($candidate['name'] ?? null) === 'Unknown Product';
 
         return $needsIngredients || $needsNutrition || $needsIdentity;
+    }
+
+    protected function isRuntimeOnlyScanProvider(ScanProvider $providerRecord): bool
+    {
+        return in_array($providerRecord->provider_key, [
+            'openai_vision',
+            'google_cloud_vision',
+        ], true);
     }
 
     protected function buildImageAugmentationDelta(array $candidate): array

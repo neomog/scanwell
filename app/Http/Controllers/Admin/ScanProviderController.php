@@ -91,6 +91,18 @@ class ScanProviderController extends Controller
             'edamam_nutrition_type' => 'nullable|string|max:100',
             'edamam_app_id' => 'nullable|string|max:255',
             'edamam_app_key' => 'nullable|string|max:255',
+            'openai_base_url' => 'nullable|url|max:255',
+            'openai_api_key' => 'nullable|string|max:255',
+            'openai_image_recognition_model' => 'nullable|string|max:255',
+            'openai_ingredient_extraction_model' => 'nullable|string|max:255',
+            'openai_nutrition_extraction_model' => 'nullable|string|max:255',
+            'google_cloud_vision_base_url' => 'nullable|url|max:255',
+            'google_cloud_vision_token_url' => 'nullable|url|max:255',
+            'google_cloud_vision_credentials_path' => 'nullable|string|max:1024',
+            'google_cloud_vision_credentials_json' => 'nullable|string|max:20000',
+            'usda_fdc_base_url' => 'nullable|url|max:255',
+            'usda_fdc_data_types' => 'nullable|string|max:255',
+            'usda_fdc_api_key' => 'nullable|string|max:255',
             'gs1_us_base_url' => 'nullable|url|max:255',
             'gs1_us_http_method' => 'nullable|string|in:GET,POST',
             'gs1_us_barcode_field' => 'nullable|string|max:100',
@@ -220,6 +232,20 @@ class ScanProviderController extends Controller
                 $settings['category'] = $validated['edamam_category'] ?: 'packaged-foods';
                 $settings['nutrition_type'] = $validated['edamam_nutrition_type'] ?: 'cooking';
                 break;
+            case 'openai_vision':
+                $settings['base_url'] = $validated['openai_base_url'] ?: 'https://api.openai.com/v1';
+                $settings['image_recognition_model'] = $validated['openai_image_recognition_model'] ?: 'gpt-5.4-mini';
+                $settings['ingredient_extraction_model'] = $validated['openai_ingredient_extraction_model'] ?: 'gpt-5.4-mini';
+                $settings['nutrition_extraction_model'] = $validated['openai_nutrition_extraction_model'] ?: 'gpt-5.4-mini';
+                break;
+            case 'google_cloud_vision':
+                $settings['base_url'] = $validated['google_cloud_vision_base_url'] ?: 'https://vision.googleapis.com/v1';
+                $settings['token_url'] = $validated['google_cloud_vision_token_url'] ?: 'https://oauth2.googleapis.com/token';
+                break;
+            case 'usda_fdc':
+                $settings['base_url'] = $validated['usda_fdc_base_url'] ?: 'https://api.nal.usda.gov/fdc/v1/foods/search';
+                $settings['data_types'] = $this->parseDelimitedValues($validated['usda_fdc_data_types'] ?? 'Branded');
+                break;
             case 'gs1_us':
                 $settings['base_url'] = $validated['gs1_us_base_url'] ?? '';
                 $settings['http_method'] = $validated['gs1_us_http_method'] ?: 'GET';
@@ -259,6 +285,16 @@ class ScanProviderController extends Controller
                 'app_id' => trim((string) ($validated['edamam_app_id'] ?? '')),
                 'app_key' => trim((string) ($validated['edamam_app_key'] ?? '')),
             ]),
+            'openai_vision' => $this->mergeCredentialValues($existing, [
+                'api_key' => trim((string) ($validated['openai_api_key'] ?? '')),
+            ]),
+            'google_cloud_vision' => $this->mergeCredentialValues($existing, [
+                'credentials_path' => trim((string) ($validated['google_cloud_vision_credentials_path'] ?? '')),
+                'credentials_json' => trim((string) ($validated['google_cloud_vision_credentials_json'] ?? '')),
+            ]),
+            'usda_fdc' => $this->mergeCredentialValues($existing, [
+                'api_key' => trim((string) ($validated['usda_fdc_api_key'] ?? '')),
+            ]),
             'gs1_us' => $this->mergeCredentialValues($existing, [
                 'api_key' => trim((string) ($validated['gs1_us_api_key'] ?? '')),
                 'account_id' => trim((string) ($validated['gs1_us_account_id'] ?? '')),
@@ -276,6 +312,16 @@ class ScanProviderController extends Controller
         }
 
         return array_filter($existing, fn ($value) => is_string($value) ? trim($value) !== '' : $value !== null);
+    }
+
+    protected function parseDelimitedValues(?string $value): array
+    {
+        return collect(preg_split('/[\r\n,;]+/', (string) $value))
+            ->map(fn (?string $item) => trim((string) $item))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     protected function buildQualityMetrics(ScanProvider $provider): array

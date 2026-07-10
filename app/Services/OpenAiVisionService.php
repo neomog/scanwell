@@ -7,16 +7,22 @@ use Illuminate\Support\Facades\Log;
 
 class OpenAiVisionService
 {
+    public function __construct(
+        protected ScanProviderRuntimeConfigService $runtimeConfig
+    ) {
+    }
+
     public function analyzeProductImage(string $imageBinary, string $mimeType = 'image/jpeg'): ?array
     {
-        $apiKey = config('services.openai.api_key');
+        $settings = $this->runtimeConfig->openAi();
+        $apiKey = $settings['api_key'] ?? null;
 
-        if (!is_string($apiKey) || trim($apiKey) === '') {
+        if (!(bool) ($settings['is_active'] ?? true) || !is_string($apiKey) || trim($apiKey) === '') {
             return null;
         }
 
         $payload = [
-            'model' => config('services.openai.image_recognition_model', 'gpt-5.4-mini'),
+            'model' => $settings['image_recognition_model'] ?? 'gpt-5.4-mini',
             'input' => [[
                 'role' => 'user',
                 'content' => [
@@ -43,8 +49,9 @@ class OpenAiVisionService
         try {
             $response = Http::withToken($apiKey)
                 ->acceptJson()
-                ->timeout((int) config('services.openai.timeout', 30))
-                ->post(rtrim((string) config('services.openai.base_url', 'https://api.openai.com/v1'), '/') . '/responses', $payload);
+                ->retry((int) ($settings['retry_attempts'] ?? 1), 200)
+                ->timeout((int) ($settings['timeout'] ?? 30))
+                ->post(rtrim((string) ($settings['base_url'] ?? 'https://api.openai.com/v1'), '/') . '/responses', $payload);
 
             if (!$response->successful()) {
                 Log::warning('OpenAI vision request failed', [
