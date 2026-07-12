@@ -40,7 +40,7 @@ class ScanProviderImportService
                 $page,
                 $config['page_size'],
                 $this->buildProviderSettings($provider),
-                $provider->credentials ?? []
+                $provider->safeCredentials()
             );
 
             $products = collect($result['products'] ?? [])

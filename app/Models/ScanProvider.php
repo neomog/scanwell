@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Log;
 
 class ScanProvider extends Model
 {
@@ -63,5 +64,22 @@ class ScanProvider extends Model
         $supportedFamilies = $this->supported_families ?? [];
 
         return $supportedFamilies === [] || in_array($family, $supportedFamilies, true);
+    }
+
+    public function safeCredentials(): array
+    {
+        try {
+            $credentials = $this->getAttribute('credentials');
+
+            return is_array($credentials) ? $credentials : [];
+        } catch (\Throwable $exception) {
+            Log::warning('Scan provider credentials could not be decrypted', [
+                'provider_key' => $this->provider_key,
+                'provider_id' => $this->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
     }
 }

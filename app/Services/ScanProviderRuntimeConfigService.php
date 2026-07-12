@@ -24,7 +24,7 @@ class ScanProviderRuntimeConfigService
         return array_merge(
             $defaults,
             $record->settings ?? [],
-            $record->credentials ?? [],
+            $record->safeCredentials(),
             [
                 'provider_key' => $record->provider_key,
                 'is_active' => (bool) $record->is_active,
@@ -50,7 +50,7 @@ class ScanProviderRuntimeConfigService
         return array_merge(
             $defaults,
             $record->settings ?? [],
-            $record->credentials ?? [],
+            $record->safeCredentials(),
             [
                 'provider_key' => $record->provider_key,
                 'is_active' => (bool) $record->is_active,

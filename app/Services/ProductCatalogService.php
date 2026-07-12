@@ -34,6 +34,7 @@ class ProductCatalogService
     {
         $candidates = [];
         $attempts = [];
+        $shortCircuitCandidate = null;
 
         foreach ($this->activeProviders($productFamily) as $providerRecord) {
             $startedAt = microtime(true);
@@ -75,7 +76,7 @@ class ProductCatalogService
                     $candidate = $providerInstance->findByBarcode(
                         $barcode,
                         $this->buildProviderSettings($providerRecord),
-                        $providerRecord->credentials ?? []
+                        $providerRecord->safeCredentials()
                     );
                 } catch (\Throwable $exception) {
                     $status = 'error';
@@ -135,6 +136,7 @@ class ProductCatalogService
                 $this->markProviderSuccess($providerRecord);
 
                 if ($this->shouldShortCircuitAfterCandidate($normalized)) {
+                    $shortCircuitCandidate = $normalized;
                     break;
                 }
             } else {
@@ -162,6 +164,10 @@ class ProductCatalogService
             'resolved' => false,
         ];
 
+        if ($shortCircuitCandidate !== null) {
+            return $this->finalizeResolvedCandidate($shortCircuitCandidate);
+        }
+
         if ($candidates === []) {
             $fallbackCandidate = $this->findTrustedSearchFallbackByBarcode($barcode, $productFamily);
 
@@ -175,10 +181,7 @@ class ProductCatalogService
                 return null;
             }
 
-            $this->lastLookupSummary['resolved'] = true;
-            $fallbackCandidate['lookup_summary'] = $this->lastLookupSummary;
-
-            return $fallbackCandidate;
+            return $this->finalizeResolvedCandidate($fallbackCandidate);
         }
 
         usort($candidates, function (array $left, array $right): int {
@@ -195,10 +198,15 @@ class ProductCatalogService
             return null;
         }
 
-        $this->lastLookupSummary['resolved'] = true;
-        $bestCandidate['lookup_summary'] = $this->lastLookupSummary;
+        return $this->finalizeResolvedCandidate($bestCandidate);
+    }
 
-        return $bestCandidate;
+    protected function finalizeResolvedCandidate(array $candidate): array
+    {
+        $this->lastLookupSummary['resolved'] = true;
+        $candidate['lookup_summary'] = $this->lastLookupSummary;
+
+        return $candidate;
     }
 
     protected function augmentCandidateFromTrustedSearch(array $candidate, ?string $productFamily = null): array
@@ -339,7 +347,7 @@ class ProductCatalogService
                         1,
                         (int) config('scanning.trusted_search_enrichment.page_size', 6),
                         $this->buildProviderSettings($providerRecord),
-                        $providerRecord->credentials ?? []
+                        $providerRecord->safeCredentials()
                     );
                 } catch (\Throwable $exception) {
                     Log::warning('Trusted product search enrichment failed', [
@@ -446,7 +454,7 @@ class ProductCatalogService
                     1,
                     (int) config('scanning.trusted_search_enrichment.page_size', 6),
                     $this->buildProviderSettings($providerRecord),
-                    $providerRecord->credentials ?? []
+                    $providerRecord->safeCredentials()
                 );
             } catch (\Throwable $exception) {
                 Log::warning('Trusted barcode fallback search failed', [

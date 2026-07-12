@@ -278,7 +278,7 @@ class ScanProviderController extends Controller
 
     protected function buildProviderCredentials(ScanProvider $scanProvider, array $validated): array
     {
-        $existing = is_array($scanProvider->credentials) ? $scanProvider->credentials : [];
+        $existing = $scanProvider->safeCredentials();
 
         return match ($scanProvider->provider_key) {
             'edamam' => $this->mergeCredentialValues($existing, [
