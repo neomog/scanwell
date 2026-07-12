@@ -198,13 +198,15 @@ class ProductImageAnalysisService
                 $openAiOutput['product_name'] ?? null,
                 $visionOutput['product_name'] ?? null,
                 $openAiOutput['confidence'] ?? null,
-                $visionOutput['confidence'] ?? null
+                $visionOutput['confidence'] ?? null,
+                'product_name'
             ),
             'brand' => $this->resolvePreferredIdentityField(
                 $openAiOutput['brand'] ?? null,
                 $visionOutput['brand'] ?? null,
                 $openAiOutput['confidence'] ?? null,
-                $visionOutput['confidence'] ?? null
+                $visionOutput['confidence'] ?? null,
+                'brand'
             ),
             'barcode_hint' => $this->nullableString($visionOutput['barcode_hint'] ?? null)
                 ?? $this->nullableString($openAiOutput['barcode_hint'] ?? null),
@@ -223,10 +225,14 @@ class ProductImageAnalysisService
 
     protected function mergeExtractedText(mixed $primary, mixed $fallback): ?string
     {
-        $parts = collect([
-            $this->nullableString($primary),
-            $this->nullableString($fallback),
-        ])->filter();
+        $primary = $this->nullableString($primary);
+        $fallback = $this->nullableString($fallback);
+
+        if ($primary !== null) {
+            return $primary;
+        }
+
+        $parts = collect([$fallback])->filter();
 
         if ($parts->isEmpty()) {
             return null;
@@ -246,7 +252,8 @@ class ProductImageAnalysisService
         mixed $openAiValue,
         mixed $visionValue,
         mixed $openAiConfidence,
-        mixed $visionConfidence
+        mixed $visionConfidence,
+        string $field
     ): ?string {
         $openAiValue = $this->nullableString($openAiValue);
         $visionValue = $this->nullableString($visionValue);
@@ -271,13 +278,27 @@ class ProductImageAnalysisService
             && $normalizedVision !== ''
             && (str_contains($normalizedOpenAi, $normalizedVision) || str_contains($normalizedVision, $normalizedOpenAi))
         ) {
-            return strlen($openAiValue) >= strlen($visionValue) ? $openAiValue : $visionValue;
+            return $this->preferredContainedIdentityValue($openAiValue, $visionValue, $field);
         }
 
         $openAiConfidence = is_numeric($openAiConfidence) ? (float) $openAiConfidence : 0.0;
         $visionConfidence = is_numeric($visionConfidence) ? (float) $visionConfidence : 0.0;
+        $openAiQuality = $this->identityQualityScore($openAiValue, $field);
+        $visionQuality = $this->identityQualityScore($visionValue, $field);
+
+        if ($openAiQuality >= ($visionQuality + 2) && $openAiConfidence >= 0.70) {
+            return $openAiValue;
+        }
+
+        if ($visionQuality >= ($openAiQuality + 2) && $visionConfidence >= 0.80) {
+            return $visionValue;
+        }
 
         if ($openAiConfidence >= 0.95 && $visionConfidence < 0.70) {
+            return $openAiValue;
+        }
+
+        if ($openAiConfidence >= 0.90 && $openAiQuality >= $visionQuality) {
             return $openAiValue;
         }
 
@@ -289,7 +310,7 @@ class ProductImageAnalysisService
             return $openAiValue;
         }
 
-        return $visionValue;
+        return $openAiQuality >= $visionQuality ? $openAiValue : $visionValue;
     }
 
     protected function analysisSourceFromProvider(mixed $provider): string
@@ -314,11 +335,53 @@ class ProductImageAnalysisService
             return true;
         }
 
-        $confidence = is_numeric($visionOutput['confidence'] ?? null) ? (float) $visionOutput['confidence'] : 0.0;
-        $hasProductName = $this->nullableString($visionOutput['product_name'] ?? null) !== null;
-        $hasBrand = $this->nullableString($visionOutput['brand'] ?? null) !== null;
+        return false;
+    }
 
-        return $confidence >= 0.88 && $hasProductName && $hasBrand;
+    protected function preferredContainedIdentityValue(string $openAiValue, string $visionValue, string $field): string
+    {
+        $openAiQuality = $this->identityQualityScore($openAiValue, $field);
+        $visionQuality = $this->identityQualityScore($visionValue, $field);
+
+        if ($openAiQuality !== $visionQuality) {
+            return $openAiQuality > $visionQuality ? $openAiValue : $visionValue;
+        }
+
+        return strlen($openAiValue) <= strlen($visionValue) ? $openAiValue : $visionValue;
+    }
+
+    protected function identityQualityScore(string $value, string $field): int
+    {
+        $normalized = $this->normalizeText($value);
+        $words = preg_split('/\s+/', $normalized) ?: [];
+        $wordCount = count(array_filter($words));
+        $score = 0;
+
+        if ($wordCount >= 1 && $wordCount <= 6) {
+            $score += 2;
+        } elseif ($wordCount > 8) {
+            $score -= 2;
+        }
+
+        if (strlen($normalized) >= 3 && strlen($normalized) <= 40) {
+            $score += 2;
+        } elseif (strlen($normalized) > 60) {
+            $score -= 2;
+        }
+
+        if ($field === 'brand' && $wordCount <= 3) {
+            $score += 1;
+        }
+
+        if (preg_match('/\b(202[0-9]|only|cinemas|tickets|promo|offer|visit|www|http|copyright|share|bubble|feel|melt|trip|york|devil|prada|wears|win)\b/i', $value)) {
+            $score -= 3;
+        }
+
+        if (preg_match('/[©®]|(?<![a-z])\d{2,}(?![a-z])/i', $value)) {
+            $score -= 2;
+        }
+
+        return $score;
     }
 
     protected function resolveBarcode(?string $clientBarcodeHint, ?string $ocrBarcodeHint, ?string $extractedText): array

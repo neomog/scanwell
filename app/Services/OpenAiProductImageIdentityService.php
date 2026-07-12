@@ -132,6 +132,8 @@ Rules:
 7. Do not guess hidden or blurry values.
 8. If a field is unclear, return null for that field.
 9. Return only valid JSON. Do not include explanations.
+10. Ignore promotional campaign text, movie tie-ins, sweepstakes text, slogans, legal copy, dates, and tiny side-panel marketing text when choosing brand or product_name.
+11. For front-of-pack products, prefer the core sellable identity, for example "Nestle Aero Chocolate", not surrounding ad copy.
 PROMPT;
     }
 

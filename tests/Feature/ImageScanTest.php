@@ -457,6 +457,89 @@ class ImageScanTest extends TestCase
             ->assertJsonPath('data.scan.scan_metadata.matched_by', 'image_visual_text_match');
     }
 
+    public function test_image_scan_prefers_openai_identity_when_google_ocr_is_noisy_promotional_text(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        Storage::fake('public');
+
+        config()->set('services.openai.api_key', 'test-openai-key');
+        config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
+
+        $product = Product::create([
+            'barcode' => '7613034920348',
+            'name' => 'Aero chocolate',
+            'brand' => 'Nestle',
+            'category_id' => 1,
+            'source' => 'manual',
+            'raw_data' => [],
+        ]);
+
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response([
+                'output' => [[
+                    'content' => [[
+                        'text' => json_encode([
+                            'barcode_hint' => null,
+                            'product_name' => 'Aero chocolate',
+                            'brand' => 'Nestle',
+                            'extracted_text' => 'Nestle Aero chocolate',
+                            'confidence' => 96,
+                        ], JSON_THROW_ON_ERROR),
+                    ]],
+                ]],
+            ]),
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'access_token' => 'google-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ]),
+            'https://vision.googleapis.com/v1/images:annotate' => Http::response([
+                'responses' => [[
+                    'fullTextAnnotation' => [
+                        'text' => "4x Nestle Aero share-a-bubble chocolate feel the bubbles melt Chorva WIN devilishly chic trip NEW YORK THE DEVIL PRADA WEARS ONLY IN CINEMAS",
+                        'pages' => [[
+                            'blocks' => [
+                                ['confidence' => 0.94],
+                            ],
+                        ]],
+                    ],
+                ]],
+            ]),
+            'https://world.openfoodfacts.org/api/v2/product/7613034920348.json' => Http::response([
+                'status' => 1,
+                'product' => [
+                    'code' => '7613034920348',
+                    'product_name' => 'Aero chocolate',
+                    'brands' => 'Nestle',
+                    'categories' => 'Chocolate candies, Bars, Chocolates',
+                    'ingredients_text' => 'Sugar, Cocoa mass',
+                    'nutriments' => [
+                        'energy-kcal_100g' => 529.63,
+                    ],
+                    'image_url' => 'https://example.com/aero.jpg',
+                ],
+            ]),
+            'https://world.openbeautyfacts.org/api/v2/product/7613034920348.json' => Http::response(['status' => 0], 404),
+            'https://world.openproductfacts.org/api/v2/product/7613034920348.json' => Http::response(['status' => 0], 404),
+            'https://world.openpetfoodfacts.org/api/v2/product/7613034920348.json' => Http::response(['status' => 0], 404),
+        ]);
+
+        $response = $this->post('/api/v1/scan/image', [
+            'image' => UploadedFile::fake()->image('aero.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.product.barcode', $product->barcode)
+            ->assertJsonPath('data.scan.scan_metadata.matched_by', 'image_brand_product_match')
+            ->assertJsonPath('data.scan.scan_metadata.analysis_source', 'hybrid_vision')
+            ->assertJsonPath('data.scan.scan_metadata.image_scan.signals.brand', 'Nestle')
+            ->assertJsonPath('data.scan.scan_metadata.image_scan.signals.product_name', 'Aero chocolate')
+            ->assertJsonPath('data.scan.scan_metadata.image_scan.signals.extracted_text', 'Nestle Aero chocolate');
+    }
+
     protected function fakeBarcodeResponses(string $barcode, array $foodResponse): array
     {
         return array_merge($this->fakeMisses($barcode), [
