@@ -10,6 +10,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class ProductImageAnalysisService
 {
@@ -29,11 +30,51 @@ class ProductImageAnalysisService
         $imageBinary = (string) file_get_contents($image->getRealPath());
         $mimeType = $image->getMimeType() ?: 'image/jpeg';
 
-        $visionOutput = $this->googleCloudVisionService->analyzeProductImage($imageBinary, $mimeType);
+        $visualOnlyCandidate = $this->matchLocalProductByVisualIdentity([
+            'brand' => null,
+            'product_name' => null,
+            'extracted_text' => null,
+            'normalized_brand' => '',
+            'normalized_product_name' => '',
+            'normalized_extracted_text' => '',
+        ], $imageBinary);
+
+        if ($visualOnlyCandidate !== null) {
+            $product = $this->productAnalysisService->analyzeByBarcode($visualOnlyCandidate['product']->barcode, $userId, $scan);
+            $signals = [
+                'barcode' => null,
+                'barcode_source' => null,
+                'product_name' => null,
+                'normalized_product_name' => '',
+                'brand' => null,
+                'normalized_brand' => '',
+                'extracted_text' => null,
+                'normalized_extracted_text' => '',
+                'confidence' => $visualOnlyCandidate['confidence'],
+                'analysis_source' => 'local_image_similarity',
+                'ocr_provider' => null,
+                'ocr_mode' => null,
+                'ocr_output' => [],
+            ];
+            $this->storeDebugSignalsOnScan($scan, $storedImage, null, $signals);
+
+            return [
+                'product' => $product,
+                'barcode' => $visualOnlyCandidate['product']->barcode,
+                'matched_by' => 'image_visual_match',
+                'confidence' => $visualOnlyCandidate['confidence'],
+                'analysis_source' => 'local_image_similarity',
+                'stored_image' => $storedImage,
+                'signals' => $signals,
+                'ocr' => null,
+            ];
+        }
+
+        $visionOutput = $this->safeGoogleVisionAnalysis($imageBinary, $mimeType, $scan);
         $openAiOutput = null;
 
         if (!$this->shouldUseVisionOnly($visionOutput)) {
-            $openAiOutput = $this->openAiProductImageIdentityService->extractFromImage($imageBinary, $mimeType);
+            $openAiOutput = $this->safeOpenAiIdentityAnalysis($imageBinary, $mimeType, $scan);
         }
 
         $ocrOutput = $openAiOutput === null
@@ -137,6 +178,34 @@ class ProductImageAnalysisService
             'mime_type' => $image->getMimeType(),
             'size' => $image->getSize(),
         ];
+    }
+
+    protected function safeGoogleVisionAnalysis(string $imageBinary, string $mimeType, ?Scan $scan): ?array
+    {
+        try {
+            return $this->googleCloudVisionService->analyzeProductImage($imageBinary, $mimeType);
+        } catch (Exception $exception) {
+            Log::warning('Image scan Google Vision analysis failed, continuing with local matching fallback', [
+                'scan_id' => $scan?->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    protected function safeOpenAiIdentityAnalysis(string $imageBinary, string $mimeType, ?Scan $scan): ?array
+    {
+        try {
+            return $this->openAiProductImageIdentityService->extractFromImage($imageBinary, $mimeType);
+        } catch (Exception $exception) {
+            Log::warning('Image scan OpenAI identity analysis failed, continuing with local matching fallback', [
+                'scan_id' => $scan?->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     protected function extractSignals(array $input, array $ocrOutput = []): array
@@ -479,17 +548,31 @@ class ProductImageAnalysisService
         }
 
         $ranked = $products->map(function (Product $product) use ($signals) {
+            $identitySupport = $this->identitySupportMetrics($product, $signals);
+
             return [
                 'product' => $product,
                 'matched_by' => 'image_alias_text_match',
                 'confidence' => round(min(0.9, $this->aliasMatchScore($product, $signals)), 4),
                 'image_similarity' => null,
+                'token_overlap' => $identitySupport['token_overlap'],
+                'paired_identity' => $identitySupport['paired_identity'],
             ];
-        })->sortByDesc('confidence')->values();
+        })->sort(function (array $left, array $right) {
+            foreach (['paired_identity', 'token_overlap', 'confidence'] as $key) {
+                $comparison = ($right[$key] ?? 0) <=> ($left[$key] ?? 0);
+
+                if ($comparison !== 0) {
+                    return $comparison;
+                }
+            }
+
+            return 0;
+        })->values();
 
         if ($this->shouldApplyImageSimilarity($ranked)) {
             $shortlist = $ranked
-                ->take(8)
+                ->take(16)
                 ->pluck('product');
 
             $imageSimilarity = $this->productImageSimilarityService->scoreProductsAgainstImage($imageBinary, $shortlist);
@@ -514,12 +597,54 @@ class ProductImageAnalysisService
         $second = $ranked->get(1);
 
         if ($best === null || $best['confidence'] < 0.55) {
+            Log::info('Image scan alias fallback rejected due to low confidence', [
+                'confidence' => $best['confidence'] ?? null,
+            ]);
             return null;
         }
 
         if ($second !== null && ($best['confidence'] - $second['confidence']) < 0.1) {
+            Log::info('Image scan alias fallback rejected due to insufficient margin', [
+                'best_product_id' => $best['product']->id ?? null,
+                'best_barcode' => $best['product']->barcode ?? null,
+                'best_confidence' => $best['confidence'] ?? null,
+                'second_confidence' => $second['confidence'] ?? null,
+            ]);
             return null;
         }
+
+        $bestTokenOverlap = (int) ($best['token_overlap'] ?? 0);
+        $bestPairedIdentity = (int) ($best['paired_identity'] ?? 0);
+        $bestImageSimilarity = is_numeric($best['image_similarity'] ?? null)
+            ? (float) $best['image_similarity']
+            : null;
+
+        if (
+            $bestPairedIdentity < 1
+            && $bestTokenOverlap < 2
+            && ($bestImageSimilarity === null || $bestImageSimilarity < 0.82)
+        ) {
+            Log::info('Image scan alias fallback rejected due to weak identity support', [
+                'best_product_id' => $best['product']->id ?? null,
+                'best_barcode' => $best['product']->barcode ?? null,
+                'best_confidence' => $best['confidence'] ?? null,
+                'image_similarity' => $bestImageSimilarity,
+                'token_overlap' => $bestTokenOverlap,
+                'paired_identity' => $bestPairedIdentity,
+            ]);
+
+            return null;
+        }
+
+        Log::info('Image scan alias fallback selected candidate', [
+            'best_product_id' => $best['product']->id ?? null,
+            'best_barcode' => $best['product']->barcode ?? null,
+            'best_confidence' => $best['confidence'] ?? null,
+            'image_similarity' => $bestImageSimilarity,
+            'token_overlap' => $bestTokenOverlap,
+            'paired_identity' => $bestPairedIdentity,
+            'matched_by' => $best['matched_by'] ?? null,
+        ]);
 
         return $best;
     }
@@ -527,28 +652,75 @@ class ProductImageAnalysisService
     protected function matchLocalProductByVisualIdentity(array $signals, string $imageBinary): ?array
     {
         $tokens = $this->searchTokens($signals);
+        $hasIdentitySignals = $tokens->isNotEmpty();
 
-        $products = Product::query()
+        $query = Product::query()
             ->with(['barcodes', 'images'])
-            ->whereHas('images')
-            ->when($tokens->isNotEmpty(), function ($builder) use ($tokens) {
-                $builder->where(function ($scoped) use ($tokens) {
-                    foreach ($tokens as $token) {
-                        $scoped->orWhere('name', 'like', '%' . $token . '%')
-                            ->orWhere('brand', 'like', '%' . $token . '%')
-                            ->orWhere('raw_data', 'like', '%' . $token . '%')
-                            ->orWhere('manual_overrides', 'like', '%' . $token . '%');
-                    }
-                });
-            })
-            ->limit($tokens->isEmpty() ? 30 : 80)
-            ->get();
+            ->whereHas('images');
+
+        if ($tokens->isNotEmpty()) {
+            $query->where(function ($scoped) use ($tokens) {
+                foreach ($tokens as $token) {
+                    $scoped->orWhere('name', 'like', '%' . $token . '%')
+                        ->orWhere('brand', 'like', '%' . $token . '%')
+                        ->orWhere('raw_data', 'like', '%' . $token . '%')
+                        ->orWhere('manual_overrides', 'like', '%' . $token . '%');
+                }
+            });
+        } else {
+            $query->limit(24);
+        }
+
+        $products = $query->get();
+
+        Log::info('Image scan visual match candidate query completed', [
+            'candidate_count' => $products->count(),
+            'tokens' => $tokens->values()->all(),
+            'token_count' => $tokens->count(),
+        ]);
 
         if ($products->isEmpty()) {
             return null;
         }
 
+        if ($tokens->isNotEmpty()) {
+            $products = $products
+                ->map(function (Product $product) use ($signals) {
+                    $identitySupport = $this->identitySupportMetrics($product, $signals);
+
+                    return [
+                        'product' => $product,
+                        'alias_score' => $this->aliasMatchScore($product, $signals),
+                        'token_overlap' => $identitySupport['token_overlap'],
+                        'paired_identity' => $identitySupport['paired_identity'],
+                    ];
+                })
+                ->sort(function (array $left, array $right) {
+                    foreach (['paired_identity', 'token_overlap', 'alias_score'] as $key) {
+                        $comparison = ($right[$key] ?? 0) <=> ($left[$key] ?? 0);
+
+                        if ($comparison !== 0) {
+                            return $comparison;
+                        }
+                    }
+
+                    return 0;
+                })
+                ->take(24)
+                ->pluck('product')
+                ->values();
+
+            Log::info('Image scan visual match candidate shortlist prepared', [
+                'shortlist_count' => $products->count(),
+            ]);
+        }
+
         $similarityScores = $this->productImageSimilarityService->scoreProductsAgainstImage($imageBinary, $products);
+
+        Log::info('Image scan visual match similarity scoring completed', [
+            'candidate_count' => $products->count(),
+            'scored_count' => count($similarityScores),
+        ]);
 
         if ($similarityScores === []) {
             return null;
@@ -562,6 +734,7 @@ class ProductImageAnalysisService
 
             $baseScore = $this->aliasMatchScore($product, $signals);
             $visualScore = $this->visualMatchConfidence((float) $similarity, $baseScore, $signals, $product);
+            $tokenOverlap = $this->catalogTokenOverlapCount($product, $signals);
 
             return [
                 'product' => $product,
@@ -569,6 +742,7 @@ class ProductImageAnalysisService
                 'confidence' => round($visualScore, 4),
                 'image_similarity' => round((float) $similarity, 4),
                 'base_score' => round($baseScore, 4),
+                'token_overlap' => $tokenOverlap,
             ];
         })->filter()->sortByDesc('confidence')->values();
 
@@ -576,24 +750,53 @@ class ProductImageAnalysisService
         $second = $ranked->get(1);
 
         if ($best === null) {
+            Log::info('Image scan visual match produced no ranked result', [
+                'candidate_count' => $products->count(),
+                'scored_count' => count($similarityScores),
+            ]);
             return null;
         }
 
         $bestSimilarity = (float) ($best['image_similarity'] ?? 0.0);
         $bestConfidence = (float) ($best['confidence'] ?? 0.0);
         $secondConfidence = (float) ($second['confidence'] ?? 0.0);
+        $bestTokenOverlap = (int) ($best['token_overlap'] ?? 0);
 
-        if ($bestSimilarity >= 0.97 && $bestConfidence >= 0.90) {
+        if (!$hasIdentitySignals) {
+            if ($bestSimilarity >= 0.985 && $bestConfidence >= 0.96) {
+                return $best;
+            }
+
+            Log::info('Image scan pure visual match rejected due to strict no-text threshold', [
+                'product_id' => $best['product']->id ?? null,
+                'barcode' => $best['product']->barcode ?? null,
+                'image_similarity' => $bestSimilarity,
+                'confidence' => $bestConfidence,
+            ]);
+
+            return null;
+        }
+
+        if ($bestSimilarity >= 0.97 && $bestConfidence >= 0.90 && $bestTokenOverlap >= 2) {
             return $best;
         }
 
-        if ($bestSimilarity >= 0.94 && $bestConfidence >= 0.82 && ($bestConfidence - $secondConfidence) >= 0.05) {
+        if ($bestSimilarity >= 0.94 && $bestConfidence >= 0.82 && ($bestConfidence - $secondConfidence) >= 0.05 && $bestTokenOverlap >= 2) {
             return $best;
         }
 
-        if ($bestSimilarity >= 0.90 && $bestConfidence >= 0.74 && ($bestConfidence - $secondConfidence) >= 0.08) {
+        if ($bestSimilarity >= 0.90 && $bestConfidence >= 0.74 && ($bestConfidence - $secondConfidence) >= 0.08 && $bestTokenOverlap >= 3) {
             return $best;
         }
+
+        Log::info('Image scan visual match best candidate below acceptance threshold', [
+            'product_id' => $best['product']->id ?? null,
+            'barcode' => $best['product']->barcode ?? null,
+            'image_similarity' => $bestSimilarity,
+            'confidence' => $bestConfidence,
+            'second_confidence' => $secondConfidence,
+            'token_overlap' => $bestTokenOverlap,
+        ]);
 
         return null;
     }
@@ -630,6 +833,7 @@ class ProductImageAnalysisService
             return '';
         }
 
+        $value = Str::ascii($value);
         $value = strtolower($value);
         $value = preg_replace('/[^a-z0-9]+/', ' ', $value) ?? '';
 
@@ -709,6 +913,7 @@ class ProductImageAnalysisService
 
         $sharedTokens = $signalTokens->intersect($aliasTokens)->count();
         $score += min(0.2, $sharedTokens * 0.03);
+        $score += $this->pairedIdentityBoost($product, $signals);
 
         return min(1.0, $score);
     }
@@ -755,6 +960,11 @@ class ProductImageAnalysisService
         return min(0.99, $confidence);
     }
 
+    protected function catalogTokenOverlapCount(Product $product, array $signals): int
+    {
+        return $this->identitySupportMetrics($product, $signals)['token_overlap'];
+    }
+
     protected function imageSimilarityBoost(float $similarity): float
     {
         return match (true) {
@@ -767,12 +977,55 @@ class ProductImageAnalysisService
         };
     }
 
+    protected function pairedIdentityBoost(Product $product, array $signals): float
+    {
+        $metrics = $this->identitySupportMetrics($product, $signals);
+
+        return match (true) {
+            $metrics['paired_identity'] >= 2 => 0.35,
+            $metrics['paired_identity'] === 1 && $metrics['token_overlap'] >= 3 => 0.2,
+            default => 0.0,
+        };
+    }
+
+    protected function identitySupportMetrics(Product $product, array $signals): array
+    {
+        $signalTokens = $this->searchTokens($signals);
+
+        if ($signalTokens->isEmpty()) {
+            return [
+                'token_overlap' => 0,
+                'paired_identity' => 0,
+            ];
+        }
+
+        $catalogTokens = collect($this->catalogAliases($product))
+            ->flatMap(fn (string $alias) => $this->tokenizeSearchText($alias))
+            ->unique();
+
+        $brandTokens = collect($this->tokenizeSearchText($product->brand));
+        $nameTokens = collect($this->tokenizeSearchText($product->name));
+        $textTokens = collect($this->tokenizeSearchText($signals['extracted_text'] ?? null));
+        $signalNameTokens = collect($this->tokenizeSearchText($signals['product_name'] ?? null));
+        $signalBrandTokens = collect($this->tokenizeSearchText($signals['brand'] ?? null));
+        $allIdentityTokens = $textTokens->merge($signalNameTokens)->merge($signalBrandTokens);
+
+        $brandMatched = $brandTokens->isNotEmpty() && $brandTokens->intersect($allIdentityTokens)->isNotEmpty();
+        $nameMatched = $nameTokens->isNotEmpty() && $nameTokens->intersect($allIdentityTokens)->isNotEmpty();
+
+        return [
+            'token_overlap' => $signalTokens->intersect($catalogTokens)->count(),
+            'paired_identity' => (int) $brandMatched + (int) $nameMatched,
+        ];
+    }
+
     protected function tokenizeSearchText(?string $value): array
     {
         if ($value === null) {
             return [];
         }
 
+        $value = Str::ascii($value);
         preg_match_all('/[a-z0-9]{3,}/i', strtolower($value), $matches);
 
         return collect($matches[0] ?? [])
@@ -791,6 +1044,9 @@ class ProductImageAnalysisService
             'contains', 'common', 'kills', 'germs', 'moisturizers', 'moisturizer',
             'bleach', 'free', 'ethyl', 'alcohol', 'label', 'serving', 'size',
             'warning', 'directions', 'product', 'panel',
+            'win', 'trip', 'new', 'york', 'devil', 'prada', 'wears', 'only',
+            'cinemas', 'devilishly', 'chic', 'share', 'bubble', 'bubbles',
+            'feel', 'melt', 'chorva', 'bubb',
         ];
     }
 

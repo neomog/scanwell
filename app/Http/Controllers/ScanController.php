@@ -205,6 +205,25 @@ class ScanController extends Controller
                 'message' => $e->getMessage(),
                 'feature' => $e->feature,
             ], 403);
+        } catch (ImageScanIdentificationException $e) {
+            if (isset($scan)) {
+                $scan->markAsFailed($e->getMessage(), [
+                    'provider_lookup' => $this->analysisService->lastLookupSummary(),
+                    'error_code' => $e->errorCode,
+                    'match_context' => $e->context,
+                ]);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'error_code' => $e->errorCode,
+                'data' => [
+                    'scan' => isset($scan) ? new ScanResource($scan->fresh()) : null,
+                    'product' => null,
+                    'match_context' => $e->context,
+                ],
+            ], $e->getCode() > 0 ? $e->getCode() : 422);
         } catch (Exception|Error $e) {
             if (isset($scan)) {
                 $scan->markAsFailed($e->getMessage(), [

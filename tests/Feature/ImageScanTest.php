@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\ProductImage;
 use App\Models\Product;
 use App\Services\ProductImageSimilarityService;
+use App\Services\ProductWorkflowService;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -646,6 +647,48 @@ class ImageScanTest extends TestCase
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.product.barcode', $target->barcode)
             ->assertJsonPath('data.scan.scan_metadata.matched_by', 'image_visual_match');
+    }
+
+    public function test_remote_catalog_images_are_localized_when_product_is_created(): void
+    {
+        Storage::fake('public');
+
+        Http::fake([
+            'https://example.com/catalog-image.jpg' => Http::response('fake-image-bytes', 200, [
+                'Content-Type' => 'image/jpeg',
+            ]),
+        ]);
+
+        /** @var ProductWorkflowService $service */
+        $service = app(ProductWorkflowService::class);
+
+        $product = $service->createProduct([
+            'barcode' => '1231231231234',
+            'name' => 'Localized Image Product',
+            'brand' => 'Scanwell',
+            'category_id' => 1,
+            'product_family' => 'food',
+            'image_url' => 'https://example.com/catalog-image.jpg',
+            'images' => [[
+                'url' => 'https://example.com/catalog-image.jpg',
+                'source' => 'open_food_facts',
+                'is_primary' => true,
+                'sort_order' => 0,
+            ]],
+            'ingredients' => [],
+            'nutrition' => [],
+            'raw_data' => [],
+        ], [
+            'source' => 'open_food_facts',
+            'audit' => false,
+        ]);
+
+        $image = $product->images()->firstOrFail();
+
+        $this->assertSame('public', $image->disk);
+        $this->assertNotNull($image->path);
+        Storage::disk('public')->assertExists($image->path);
+        $this->assertSame(Storage::disk('public')->url($image->path), $product->fresh()->image_url);
     }
 
     protected function fakeBarcodeResponses(string $barcode, array $foodResponse): array

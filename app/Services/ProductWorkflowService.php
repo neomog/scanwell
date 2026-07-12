@@ -13,6 +13,10 @@ use App\Models\ProductContribution;
 use App\Models\ProductImage;
 use App\Models\User;
 use InvalidArgumentException;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class ProductWorkflowService
 {
@@ -492,10 +496,13 @@ class ProductWorkflowService
 
     protected function syncImages(Product $product, array $images, ?User $actor = null): void
     {
+        $images = $this->localizeImages($product, $images);
         ProductImage::where('product_id', $product->id)->delete();
 
+        $primaryImageUrl = null;
+
         foreach (collect($images)->values() as $index => $image) {
-            ProductImage::create([
+            $record = ProductImage::create([
                 'product_id' => $product->id,
                 'disk' => $image['disk'] ?? null,
                 'path' => $image['path'] ?? null,
@@ -505,7 +512,136 @@ class ProductWorkflowService
                 'sort_order' => $image['sort_order'] ?? $index,
                 'uploaded_by' => $actor?->id,
             ]);
+
+            if ($primaryImageUrl === null && $record->is_primary) {
+                $primaryImageUrl = $record->resolved_url;
+            }
         }
+
+        if ($primaryImageUrl === null) {
+            $primaryImageUrl = ProductImage::query()
+                ->where('product_id', $product->id)
+                ->orderByDesc('is_primary')
+                ->orderBy('sort_order')
+                ->first()?->resolved_url;
+        }
+
+        if ($primaryImageUrl !== null && $product->image_url !== $primaryImageUrl) {
+            $product->forceFill(['image_url' => $primaryImageUrl])->saveQuietly();
+        }
+    }
+
+    protected function localizeImages(Product $product, array $images): array
+    {
+        return collect($images)
+            ->map(function ($image, int $index) use ($product) {
+                if (!is_array($image)) {
+                    return null;
+                }
+
+                if (!empty($image['disk']) && !empty($image['path'])) {
+                    $image['sort_order'] = $image['sort_order'] ?? $index;
+                    $image['is_primary'] = (bool) ($image['is_primary'] ?? $index === 0);
+                    return $image;
+                }
+
+                $remoteUrl = isset($image['url']) ? trim((string) $image['url']) : '';
+                if ($remoteUrl === '' || !filter_var($remoteUrl, FILTER_VALIDATE_URL)) {
+                    $image['sort_order'] = $image['sort_order'] ?? $index;
+                    $image['is_primary'] = (bool) ($image['is_primary'] ?? $index === 0);
+                    return $image;
+                }
+
+                $downloaded = $this->downloadProductImageToPublicDisk($product, $remoteUrl, $index);
+                if ($downloaded === null) {
+                    $image['sort_order'] = $image['sort_order'] ?? $index;
+                    $image['is_primary'] = (bool) ($image['is_primary'] ?? $index === 0);
+                    return $image;
+                }
+
+                return [
+                    'disk' => 'public',
+                    'path' => $downloaded['path'],
+                    'url' => Storage::disk('public')->url($downloaded['path']),
+                    'source' => $image['source'] ?? 'catalog_import',
+                    'is_primary' => (bool) ($image['is_primary'] ?? $index === 0),
+                    'sort_order' => $image['sort_order'] ?? $index,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    protected function downloadProductImageToPublicDisk(Product $product, string $remoteUrl, int $index): ?array
+    {
+        try {
+            $response = Http::timeout(15)
+                ->retry(1, 200)
+                ->accept('image/*')
+                ->get($remoteUrl);
+
+            if (!$response->successful()) {
+                return null;
+            }
+
+            $binary = $response->body();
+            if (!is_string($binary) || $binary === '') {
+                return null;
+            }
+
+            $contentType = strtolower(trim(explode(';', (string) $response->header('Content-Type', 'image/jpeg'))[0]));
+            if ($contentType !== '' && !str_starts_with($contentType, 'image/')) {
+                return null;
+            }
+
+            $extension = $this->imageExtensionFromContentTypeOrUrl($contentType, $remoteUrl);
+            $filename = sha1($remoteUrl . '|' . strlen($binary)) . '.' . $extension;
+            $path = 'product-images/' . $product->id . '/' . $filename;
+
+            Storage::disk('public')->put($path, $binary);
+
+            return [
+                'disk' => 'public',
+                'path' => $path,
+                'index' => $index,
+            ];
+        } catch (\Throwable $exception) {
+            Log::debug('Failed to localize remote product image', [
+                'product_id' => $product->id,
+                'barcode' => $product->barcode,
+                'url' => $remoteUrl,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    protected function imageExtensionFromContentTypeOrUrl(?string $contentType, string $remoteUrl): string
+    {
+        return match ($contentType) {
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'image/gif' => 'gif',
+            'image/jpeg', 'image/jpg' => 'jpg',
+            default => $this->extensionFromUrl($remoteUrl) ?? 'jpg',
+        };
+    }
+
+    protected function extensionFromUrl(string $remoteUrl): ?string
+    {
+        $path = parse_url($remoteUrl, PHP_URL_PATH);
+        if (!is_string($path) || $path === '') {
+            return null;
+        }
+
+        $extension = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+        if ($extension === '') {
+            return null;
+        }
+
+        return Str::limit($extension, 5, '');
     }
 
     protected function buildRawData(?Product $product, array $payload, array $manualOverrides, array $context): array
