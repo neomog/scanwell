@@ -88,7 +88,8 @@ class ProductImageAnalysisService
             );
         }
 
-        $candidate = $this->matchLocalProductByNormalizedIdentity($signals)
+        $candidate = $this->matchLocalProductByVisualIdentity($signals, $imageBinary)
+            ?? $this->matchLocalProductByNormalizedIdentity($signals)
             ?? $this->matchLocalProductFromAliases($signals, $imageBinary);
 
         if ($candidate !== null) {
@@ -523,6 +524,80 @@ class ProductImageAnalysisService
         return $best;
     }
 
+    protected function matchLocalProductByVisualIdentity(array $signals, string $imageBinary): ?array
+    {
+        $tokens = $this->searchTokens($signals);
+
+        $products = Product::query()
+            ->with(['barcodes', 'images'])
+            ->whereHas('images')
+            ->when($tokens->isNotEmpty(), function ($builder) use ($tokens) {
+                $builder->where(function ($scoped) use ($tokens) {
+                    foreach ($tokens as $token) {
+                        $scoped->orWhere('name', 'like', '%' . $token . '%')
+                            ->orWhere('brand', 'like', '%' . $token . '%')
+                            ->orWhere('raw_data', 'like', '%' . $token . '%')
+                            ->orWhere('manual_overrides', 'like', '%' . $token . '%');
+                    }
+                });
+            })
+            ->limit($tokens->isEmpty() ? 30 : 80)
+            ->get();
+
+        if ($products->isEmpty()) {
+            return null;
+        }
+
+        $similarityScores = $this->productImageSimilarityService->scoreProductsAgainstImage($imageBinary, $products);
+
+        if ($similarityScores === []) {
+            return null;
+        }
+
+        $ranked = $products->map(function (Product $product) use ($signals, $similarityScores) {
+            $similarity = data_get($similarityScores, $product->id . '.similarity');
+            if (!is_numeric($similarity)) {
+                return null;
+            }
+
+            $baseScore = $this->aliasMatchScore($product, $signals);
+            $visualScore = $this->visualMatchConfidence((float) $similarity, $baseScore, $signals, $product);
+
+            return [
+                'product' => $product,
+                'matched_by' => (float) $similarity >= 0.93 ? 'image_visual_match' : 'image_visual_text_match',
+                'confidence' => round($visualScore, 4),
+                'image_similarity' => round((float) $similarity, 4),
+                'base_score' => round($baseScore, 4),
+            ];
+        })->filter()->sortByDesc('confidence')->values();
+
+        $best = $ranked->first();
+        $second = $ranked->get(1);
+
+        if ($best === null) {
+            return null;
+        }
+
+        $bestSimilarity = (float) ($best['image_similarity'] ?? 0.0);
+        $bestConfidence = (float) ($best['confidence'] ?? 0.0);
+        $secondConfidence = (float) ($second['confidence'] ?? 0.0);
+
+        if ($bestSimilarity >= 0.97 && $bestConfidence >= 0.90) {
+            return $best;
+        }
+
+        if ($bestSimilarity >= 0.94 && $bestConfidence >= 0.82 && ($bestConfidence - $secondConfidence) >= 0.05) {
+            return $best;
+        }
+
+        if ($bestSimilarity >= 0.90 && $bestConfidence >= 0.74 && ($bestConfidence - $secondConfidence) >= 0.08) {
+            return $best;
+        }
+
+        return null;
+    }
+
     protected function shouldApplyImageSimilarity(Collection $ranked): bool
     {
         $best = $ranked->first();
@@ -617,6 +692,14 @@ class ProductImageAnalysisService
             if ($normalizedProductName !== '' && ($normalizedAlias === $normalizedProductName || str_contains($normalizedAlias, $normalizedProductName))) {
                 $score += 0.12;
             }
+
+            $aliasTokens = collect($this->tokenizeSearchText($alias));
+            $signalTextTokens = collect($this->tokenizeSearchText($signals['extracted_text'] ?? null));
+            $sharedAliasTokens = $signalTextTokens->intersect($aliasTokens)->count();
+            if ($aliasTokens->isNotEmpty() && $sharedAliasTokens > 0) {
+                $coverage = $sharedAliasTokens / max(1, $aliasTokens->count());
+                $score += min(0.22, $coverage * 0.22);
+            }
         }
 
         $signalTokens = $this->searchTokens($signals);
@@ -628,6 +711,48 @@ class ProductImageAnalysisService
         $score += min(0.2, $sharedTokens * 0.03);
 
         return min(1.0, $score);
+    }
+
+    protected function visualMatchConfidence(float $similarity, float $baseScore, array $signals, Product $product): float
+    {
+        $confidence = $baseScore;
+
+        if ($similarity >= 0.98) {
+            $confidence = max($confidence, 0.97);
+        } elseif ($similarity >= 0.96) {
+            $confidence = max($confidence, 0.92);
+        } elseif ($similarity >= 0.94) {
+            $confidence = max($confidence, 0.86);
+        } elseif ($similarity >= 0.90) {
+            $confidence = max($confidence, 0.76);
+        } elseif ($similarity >= 0.86) {
+            $confidence = max($confidence, 0.66);
+        } else {
+            $confidence += $this->imageSimilarityBoost($similarity);
+        }
+
+        $signalBrandTokens = collect($this->tokenizeSearchText($signals['brand'] ?? null));
+        $signalNameTokens = collect($this->tokenizeSearchText($signals['product_name'] ?? null));
+        $signalTextTokens = collect($this->tokenizeSearchText($signals['extracted_text'] ?? null));
+        $catalogTokens = collect($this->catalogAliases($product))
+            ->flatMap(fn (string $alias) => $this->tokenizeSearchText($alias))
+            ->unique()
+            ->values();
+
+        if ($signalBrandTokens->isNotEmpty() && $signalBrandTokens->intersect($catalogTokens)->isNotEmpty()) {
+            $confidence += 0.06;
+        }
+
+        if ($signalNameTokens->isNotEmpty() && $signalNameTokens->intersect($catalogTokens)->count() >= 1) {
+            $confidence += 0.08;
+        }
+
+        if ($signalTextTokens->isNotEmpty() && $catalogTokens->isNotEmpty()) {
+            $coverage = $signalTextTokens->intersect($catalogTokens)->count() / max(1, min(6, $catalogTokens->count()));
+            $confidence += min(0.08, $coverage * 0.08);
+        }
+
+        return min(0.99, $confidence);
     }
 
     protected function imageSimilarityBoost(float $similarity): float
@@ -674,8 +799,13 @@ class ProductImageAnalysisService
         $rawAliases = collect([
             $product->name,
             $product->brand,
+            trim(implode(' ', array_filter([$product->brand, $product->name]))),
             data_get($product->manual_overrides, 'name'),
             data_get($product->manual_overrides, 'brand'),
+            trim(implode(' ', array_filter([
+                data_get($product->manual_overrides, 'brand'),
+                data_get($product->manual_overrides, 'name'),
+            ]))),
             data_get($product->raw_data, 'product_name'),
             data_get($product->raw_data, 'generic_name'),
             data_get($product->raw_data, 'abbreviated_product_name'),
@@ -683,6 +813,10 @@ class ProductImageAnalysisService
             data_get($product->raw_data, 'brand'),
             data_get($product->raw_data, 'brand_owner'),
             data_get($product->raw_data, 'product_title'),
+            trim(implode(' ', array_filter([
+                data_get($product->raw_data, 'brands'),
+                data_get($product->raw_data, 'product_name'),
+            ]))),
         ]);
 
         $listAliases = collect([
