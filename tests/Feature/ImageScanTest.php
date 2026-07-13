@@ -649,6 +649,136 @@ class ImageScanTest extends TestCase
             ->assertJsonPath('data.scan.scan_metadata.matched_by', 'image_visual_match');
     }
 
+    public function test_image_scan_keeps_strong_visual_winner_when_confidence_ties_between_candidates(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        Storage::fake('public');
+
+        config()->set('services.openai.api_key', null);
+        config()->set('services.google_cloud_vision.credentials_json', $this->fakeGoogleCredentialsJson());
+
+        $target = Product::create([
+            'barcode' => '7613034920348',
+            'name' => 'Aero chocolate',
+            'brand' => 'Nestle',
+            'category_id' => 1,
+            'source' => 'manual',
+            'raw_data' => [],
+        ]);
+
+        ProductImage::create([
+            'product_id' => $target->id,
+            'url' => 'https://example.com/aero.jpg',
+            'source' => 'manual',
+            'is_primary' => true,
+            'sort_order' => 0,
+        ]);
+
+        $fallback = Product::create([
+            'barcode' => '6033000680051',
+            'name' => 'Classic Coffee',
+            'brand' => 'Nescafe',
+            'category_id' => 1,
+            'source' => 'manual',
+            'raw_data' => [],
+        ]);
+
+        ProductImage::create([
+            'product_id' => $fallback->id,
+            'url' => 'https://example.com/nescafe.jpg',
+            'source' => 'manual',
+            'is_primary' => true,
+            'sort_order' => 0,
+        ]);
+
+        $closeSibling = Product::create([
+            'barcode' => '7613035040823',
+            'name' => 'Aero Peppermint',
+            'brand' => 'Nestle',
+            'category_id' => 1,
+            'source' => 'manual',
+            'raw_data' => [],
+        ]);
+
+        ProductImage::create([
+            'product_id' => $closeSibling->id,
+            'url' => 'https://example.com/aero-peppermint.jpg',
+            'source' => 'manual',
+            'is_primary' => true,
+            'sort_order' => 0,
+        ]);
+
+        $this->mock(ProductImageSimilarityService::class, function ($mock) use ($target, $fallback, $closeSibling) {
+            $mock->shouldReceive('scoreProductsAgainstImage')
+                ->once()
+                ->andReturn([
+                    $target->id => [
+                        'similarity' => 0.7253,
+                        'image_id' => 'img-aero',
+                        'image_url' => 'https://example.com/aero.jpg',
+                    ],
+                    $fallback->id => [
+                        'similarity' => 0.6784,
+                        'image_id' => 'img-nescafe',
+                        'image_url' => 'https://example.com/nescafe.jpg',
+                    ],
+                    $closeSibling->id => [
+                        'similarity' => 0.6901,
+                        'image_id' => 'img-aero-peppermint',
+                        'image_url' => 'https://example.com/aero-peppermint.jpg',
+                    ],
+                ]);
+        });
+
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'access_token' => 'google-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ]),
+            'https://vision.googleapis.com/v1/images:annotate' => Http::response([
+                'responses' => [[
+                    'fullTextAnnotation' => [
+                        'text' => "4x Nestle Aero chocolate 2025 206 CENTURY STIDOS UKC open late drawsack 1serving 143 calories per energy bar",
+                        'pages' => [[
+                            'blocks' => [
+                                ['confidence' => 0.94],
+                            ],
+                        ]],
+                    ],
+                ]],
+            ]),
+            'https://world.openfoodfacts.org/api/v2/product/7613034920348.json' => Http::response([
+                'status' => 1,
+                'product' => [
+                    'code' => '7613034920348',
+                    'product_name' => 'Aero chocolate',
+                    'brands' => 'Nestle',
+                    'categories' => 'Chocolate candies, Bars, Chocolates',
+                    'ingredients_text' => 'Sugar, Cocoa mass',
+                    'nutriments' => [
+                        'energy-kcal_100g' => 529.63,
+                    ],
+                    'image_url' => 'https://example.com/aero.jpg',
+                ],
+            ]),
+            'https://world.openbeautyfacts.org/api/v2/product/7613034920348.json' => Http::response(['status' => 0], 404),
+            'https://world.openproductfacts.org/api/v2/product/7613034920348.json' => Http::response(['status' => 0], 404),
+            'https://world.openpetfoodfacts.org/api/v2/product/7613034920348.json' => Http::response(['status' => 0], 404),
+        ]);
+
+        $response = $this->post('/api/v1/scan/image', [
+            'image' => UploadedFile::fake()->image('aero-visual-tie.jpg'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.product.barcode', $target->barcode)
+            ->assertJsonPath('data.scan.scan_metadata.matched_by', 'image_visual_text_match');
+    }
+
     public function test_remote_catalog_images_are_localized_when_product_is_created(): void
     {
         Storage::fake('public');

@@ -760,6 +760,7 @@ class ProductImageAnalysisService
         $bestSimilarity = (float) ($best['image_similarity'] ?? 0.0);
         $bestConfidence = (float) ($best['confidence'] ?? 0.0);
         $secondConfidence = (float) ($second['confidence'] ?? 0.0);
+        $secondSimilarity = (float) ($second['image_similarity'] ?? 0.0);
         $bestTokenOverlap = (int) ($best['token_overlap'] ?? 0);
 
         if (!$hasIdentitySignals) {
@@ -789,12 +790,35 @@ class ProductImageAnalysisService
             return $best;
         }
 
+        // When confidence saturates across multiple candidates, preserve a strong
+        // visually-supported winner instead of letting a weaker alias fallback
+        // override it later.
+        if (
+            $bestConfidence >= 0.95
+            && $bestTokenOverlap >= 3
+            && $bestSimilarity >= 0.72
+            && ($bestSimilarity - $secondSimilarity) >= 0.03
+        ) {
+            Log::info('Image scan visual match accepted due to strong visual lead despite confidence tie', [
+                'product_id' => $best['product']->id ?? null,
+                'barcode' => $best['product']->barcode ?? null,
+                'image_similarity' => $bestSimilarity,
+                'second_similarity' => $secondSimilarity,
+                'confidence' => $bestConfidence,
+                'second_confidence' => $secondConfidence,
+                'token_overlap' => $bestTokenOverlap,
+            ]);
+
+            return $best;
+        }
+
         Log::info('Image scan visual match best candidate below acceptance threshold', [
             'product_id' => $best['product']->id ?? null,
             'barcode' => $best['product']->barcode ?? null,
             'image_similarity' => $bestSimilarity,
             'confidence' => $bestConfidence,
             'second_confidence' => $secondConfidence,
+            'second_similarity' => $secondSimilarity,
             'token_overlap' => $bestTokenOverlap,
         ]);
 
