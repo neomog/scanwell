@@ -53,6 +53,8 @@ class ScoreCalculationService
 
         $overallScore = min($overallScore, config('scanning.perfect_score_cap', 95));
 
+        $analysis = $this->buildFoodAnalysis($product, $nutritionScore, $ingredientScore, $additiveScore, $processingScore, $packagingScore);
+
         $scoreBreakdown = [
             'nutrition' => $nutritionScore,
             'ingredient' => $ingredientScore,
@@ -61,6 +63,7 @@ class ScoreCalculationService
             'packaging' => $packagingScore,
             'confidence' => data_get($product->raw_data, '_scanwell.confidence'),
             'completeness' => data_get($product->raw_data, '_scanwell.completeness'),
+            'analysis' => $analysis,
         ];
 
         return [
@@ -75,6 +78,7 @@ class ScoreCalculationService
             'warnings' => array_values(array_unique($warnings)),
             'benefits' => array_values(array_unique($benefits)),
             'explanation' => $this->generateFoodExplanation($product, $scoreBreakdown, $warnings, $benefits),
+            'analysis' => $analysis,
         ];
     }
 
@@ -135,6 +139,8 @@ class ScoreCalculationService
             $allergenScore
         );
 
+        $analysis = $this->buildCosmeticAnalysis($product, $irritantScore, $endocrineScore, $allergenScore, $environmentalScore);
+
         $scoreBreakdown = [
             'irritant' => $irritantScore,
             'endocrine' => $endocrineScore,
@@ -142,6 +148,7 @@ class ScoreCalculationService
             'environmental' => $environmentalScore,
             'confidence' => data_get($product->raw_data, '_scanwell.confidence'),
             'completeness' => data_get($product->raw_data, '_scanwell.completeness'),
+            'analysis' => $analysis,
         ];
 
         return [
@@ -155,6 +162,7 @@ class ScoreCalculationService
             'benefits' => array_values(array_unique($benefits)),
             'skin_types_suitable' => $this->determineSuitableSkinTypes($ingredientNames->all(), $warnings),
             'explanation' => $this->generateCosmeticExplanation($scoreBreakdown, $warnings, $benefits),
+            'analysis' => $analysis,
         ];
     }
 
@@ -397,6 +405,138 @@ class ScoreCalculationService
         }
 
         return $warnings;
+    }
+
+    protected function buildFoodAnalysis(
+        Product $product,
+        float $nutritionScore,
+        float $ingredientScore,
+        float $additiveScore,
+        float $processingScore,
+        float $packagingScore
+    ): array {
+        $negatives = [];
+        $positives = [];
+        $nutrition = $product->nutrition;
+
+        if ($nutrition) {
+            if (($nutrition->sugars ?? 0) > 10) {
+                $negatives[] = $this->insight('sugar', 'nutrition', 'Sugar', $nutrition->sugars . 'g per 100g', 'high', 'Very high sugar content.', 'Sugar is above the preferred threshold for this product category.', 'nutrition_label');
+            } elseif (($nutrition->sugars ?? 0) <= 5) {
+                $positives[] = $this->insight('sugar', 'nutrition', 'Sugar', $nutrition->sugars . 'g per 100g', 'low', 'Low sugar content.', 'Sugar is within the preferred threshold used by the scoring engine.', 'nutrition_label');
+            }
+
+            if (($nutrition->saturated_fat ?? 0) > 5) {
+                $negatives[] = $this->insight('saturated-fat', 'nutrition', 'Saturated fat', $nutrition->saturated_fat . 'g per 100g', 'high', 'High saturated fat content.', 'This reduces the nutrition component of the score.', 'nutrition_label');
+            }
+
+            if (($nutrition->sodium ?? 0) > 400) {
+                $negatives[] = $this->insight('sodium', 'nutrition', 'Sodium', $nutrition->sodium . 'mg per 100g', 'medium', 'High sodium content.', 'Sodium is above the preferred threshold used by the scoring engine.', 'nutrition_label');
+            } elseif (($nutrition->sodium ?? 0) <= 150) {
+                $positives[] = $this->insight('sodium', 'nutrition', 'Sodium', $nutrition->sodium . 'mg per 100g', 'low', 'Relatively low sodium.', 'Sodium is within the preferred range used by the scoring engine.', 'nutrition_label');
+            }
+
+            if (($nutrition->fiber ?? 0) >= 3) {
+                $positives[] = $this->insight('fiber', 'nutrition', 'Fiber', $nutrition->fiber . 'g per 100g', 'low', 'Good fiber content.', 'Fiber contributes positively to the nutrition score.', 'nutrition_label');
+            }
+        }
+
+        foreach ($product->ingredients as $ingredient) {
+            $risk = (string) ($ingredient->risk_level ?? 'unknown');
+            $name = trim((string) $ingredient->name);
+            $healthEffects = is_array($ingredient->health_effects)
+                ? implode(', ', array_map('strval', $ingredient->health_effects))
+                : (string) ($ingredient->health_effects ?? '');
+            $details = (string) ($ingredient->description ?: ($healthEffects ?: 'Ingredient information is based on the current ingredient reference data.'));
+            $isAdditive = (bool) ($ingredient->pivot?->is_additive ?? false);
+
+            if (in_array($risk, ['high', 'medium'], true) || $isAdditive) {
+                $negatives[] = $this->insight(
+                    'ingredient-' . $ingredient->id,
+                    'ingredient',
+                    $name,
+                    $isAdditive ? 'Additive' : ucfirst($risk) . ' concern',
+                    $risk === 'high' ? 'high' : 'medium',
+                    $isAdditive ? 'Additive or processing concern detected.' : ucfirst($risk) . ' ingredient concern detected.',
+                    $details,
+                    'ingredient_reference',
+                    $ingredient->id
+                );
+            } elseif ($risk === 'low') {
+                $positives[] = $this->insight(
+                    'ingredient-' . $ingredient->id,
+                    'ingredient',
+                    $name,
+                    'Low concern',
+                    'low',
+                    'No significant concern found in the current ingredient reference data.',
+                    $details,
+                    'ingredient_reference',
+                    $ingredient->id
+                );
+            }
+        }
+
+        if ($processingScore < 45) {
+            $negatives[] = $this->insight('processing', 'processing', 'Processing', (string) $processingScore . '/100', 'high', 'Product appears highly processed.', 'Processing score is based on available NOVA data and ingredient complexity.', 'scoring_rules');
+        }
+
+        if ($packagingScore < 70) {
+            $negatives[] = $this->insight('packaging', 'packaging', 'Packaging', (string) $packagingScore . '/100', 'medium', 'Packaging reduces the score.', 'Packaging impact is based on the verified packaging materials available for this product.', 'packaging_data');
+        }
+
+        return ['negatives' => array_values($negatives), 'positives' => array_values($positives)];
+    }
+
+    protected function buildCosmeticAnalysis(Product $product, float $irritantScore, float $endocrineScore, float $allergenScore, float $environmentalScore): array
+    {
+        $negatives = [];
+        $positives = [];
+
+        foreach ($product->ingredients as $ingredient) {
+            $risk = (string) ($ingredient->risk_level ?? 'unknown');
+            $name = trim((string) $ingredient->name);
+            $healthEffects = is_array($ingredient->health_effects)
+                ? implode(', ', array_map('strval', $ingredient->health_effects))
+                : (string) ($ingredient->health_effects ?? '');
+            $details = (string) ($ingredient->description ?: ($healthEffects ?: 'Ingredient information is based on the current ingredient reference data.'));
+
+            if (in_array($risk, ['high', 'medium'], true)) {
+                $negatives[] = $this->insight('ingredient-' . $ingredient->id, 'ingredient', $name, ucfirst($risk) . ' concern', $risk === 'high' ? 'high' : 'medium', 'Potential cosmetic ingredient concern detected.', $details, 'ingredient_reference', $ingredient->id);
+            } elseif ($risk === 'low') {
+                $positives[] = $this->insight('ingredient-' . $ingredient->id, 'ingredient', $name, 'Low concern', 'low', 'No significant concern found in the current ingredient reference data.', $details, 'ingredient_reference', $ingredient->id);
+            }
+        }
+
+        foreach ([
+            ['irritant', 'Irritants', $irritantScore],
+            ['endocrine', 'Endocrine disruptors', $endocrineScore],
+            ['allergen', 'Fragrance allergens', $allergenScore],
+            ['environmental', 'Environmental impact', $environmentalScore],
+        ] as [$key, $title, $score]) {
+            if ($score < 60) {
+                $negatives[] = $this->insight($key, 'cosmetic', $title, (string) $score . '/100', 'medium', $title . ' concern detected.', 'This component was reduced by the ingredient rules used for cosmetic analysis.', 'scoring_rules');
+            } elseif ($score >= 75) {
+                $positives[] = $this->insight($key, 'cosmetic', $title, (string) $score . '/100', 'low', 'Low apparent concern.', 'This component scored well under the current cosmetic rules.', 'scoring_rules');
+            }
+        }
+
+        return ['negatives' => array_values($negatives), 'positives' => array_values($positives)];
+    }
+
+    protected function insight(string $id, string $type, string $title, ?string $value, string $severity, string $summary, string $details, string $source, ?string $ingredientId = null): array
+    {
+        return array_filter([
+            'id' => $id,
+            'type' => $type,
+            'title' => $title,
+            'value' => $value,
+            'severity' => $severity,
+            'summary' => $summary,
+            'details' => $details,
+            'source' => $source,
+            'ingredient_id' => $ingredientId,
+        ], fn ($item): bool => $item !== null && $item !== '');
     }
 
     protected function buildFoodBenefits(Product $product, float $nutritionScore, float $ingredientScore): array

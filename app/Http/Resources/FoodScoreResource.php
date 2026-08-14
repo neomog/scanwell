@@ -25,6 +25,10 @@ class FoodScoreResource extends JsonResource
             'nova_group' => $this->nova_group,
             'nutriscore_grade' => $this->nutriscore_grade,
             'score_breakdown' => $this->score_breakdown,
+            'analysis' => data_get($this->score_breakdown, 'analysis', [
+                'negatives' => [],
+                'positives' => [],
+            ]),
             'explanation_text' => $this->explanation_text,
             'warnings' => $this->warnings,
             'benefits' => $this->benefits,

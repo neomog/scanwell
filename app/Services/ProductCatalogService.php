@@ -37,6 +37,12 @@ class ProductCatalogService
         $shortCircuitCandidate = null;
 
         foreach ($this->activeProviders($productFamily) as $providerRecord) {
+            // Web search is an expensive fallback. It should only run after all
+            // deterministic catalog providers failed to return an acceptable candidate.
+            if ($providerRecord->provider_key === 'openai_barcode_web' && $candidates !== []) {
+                continue;
+            }
+
             $startedAt = microtime(true);
             $candidate = null;
             $error = null;

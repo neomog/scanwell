@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\EdamamFoodDatabaseService;
+use App\Services\OpenAiBarcodeWebSearchService;
 use App\Services\OpenFoodFactsService;
 use App\Services\UsdaFoodDataCentralService;
 
@@ -9,6 +10,7 @@ return [
         OpenFoodFactsService::class,
         EdamamFoodDatabaseService::class,
         UsdaFoodDataCentralService::class,
+        OpenAiBarcodeWebSearchService::class,
     ],
 
     'min_candidate_confidence' => (int) env('SCAN_MIN_CANDIDATE_CONFIDENCE', 45),

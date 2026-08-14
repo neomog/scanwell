@@ -45,6 +45,10 @@ return [
         'ios_client_id' => env('GOOGLE_IOS_CLIENT_ID'),
     ],
 
+    'apple' => [
+        'client_id' => env('APPLE_CLIENT_ID', 'com.infinistream.labelwisemobileapp'),
+    ],
+
     'facebook' => [
         'client_id' => env('FACEBOOK_CLIENT_ID'),
         'client_secret' => env('FACEBOOK_CLIENT_SECRET'),
@@ -115,6 +119,8 @@ return [
         'image_recognition_model' => env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini'),
         'ingredient_extraction_model' => env('OPENAI_INGREDIENT_EXTRACTION_MODEL', env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini')),
         'nutrition_extraction_model' => env('OPENAI_NUTRITION_EXTRACTION_MODEL', env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini')),
+        'barcode_web_search_model' => env('OPENAI_BARCODE_WEB_SEARCH_MODEL', env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.4-mini')),
+        'barcode_web_search_enabled' => (bool) env('OPENAI_BARCODE_WEB_SEARCH_ENABLED', true),
     ],
 
 ];

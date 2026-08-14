@@ -71,6 +71,7 @@ class ProductAnalysisService
 
         return $this->productWorkflowService->createProduct($payload, [
             'source' => $catalogData['source'],
+            'mark_approved' => ($catalogData['source'] ?? null) !== 'openai_web_search',
             'audit' => false,
         ]);
     }
@@ -165,6 +166,9 @@ class ProductAnalysisService
             'warnings' => $catalogData['warnings'] ?? [],
             'lookup_summary' => $catalogData['lookup_summary'] ?? $this->productCatalogService->lastLookupSummary(),
             'resolved_at' => now()->toIso8601String(),
+            'verification_status' => ($catalogData['source'] ?? null) === 'openai_web_search'
+                ? 'provisional_web_match'
+                : 'provider_verified',
         ];
 
         return $rawData;

@@ -19,6 +19,13 @@ This document complements the multi-provider scan engine and the super-admin pro
   - Type: enterprise paid
   - Covers: `food`, `cosmetic`, `pet_food`, `household`, `general`
 
+- `openai_barcode_web`
+  - Driver: `App\\Services\\OpenAiBarcodeWebSearchService`
+  - Type: fallback
+  - Covers: `food`, `cosmetic`, `pet_food`, `household`, `general`
+  - Runs only after deterministic catalog providers return no acceptable exact-barcode candidate.
+  - Requires an exact barcode-supported web result; otherwise the scan keeps the existing not-found flow.
+
 ## Admin workflow
 
 Open `/admin/scanning/providers` as a super admin.
