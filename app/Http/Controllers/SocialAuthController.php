@@ -3,12 +3,17 @@
 namespace App\Http\Controllers;
 
 use Google_Client;
+use Firebase\JWT\JWK;
+use Firebase\JWT\JWT;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class SocialAuthController extends Controller
 {
@@ -116,6 +121,125 @@ class SocialAuthController extends Controller
                 'user' => new UserResource($user),
             ],
         ]);
+    }
+
+    public function appleMobileAuth(Request $request)
+    {
+        $validated = $request->validate([
+            'identity_token' => ['required', 'string'],
+            'authorization_code' => ['nullable', 'string'],
+            'name' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $payload = $this->verifyAppleIdentityToken($validated['identity_token']);
+
+        if (!$payload) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid Apple identity token',
+            ], 401);
+        }
+
+        $appleId = $payload['sub'];
+        $email = isset($payload['email']) ? strtolower(trim((string) $payload['email'])) : null;
+
+        $user = User::where('provider', 'apple')
+            ->where('provider_id', $appleId)
+            ->first();
+
+        if (!$user && $email) {
+            $user = User::whereRaw('LOWER(email) = ?', [$email])->first();
+        }
+
+        if (!$user && !$email) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Apple did not provide an email address for this account',
+            ], 422);
+        }
+
+        if ($user) {
+            $updates = [];
+
+            if (empty($user->provider)) {
+                $updates['provider'] = 'apple';
+                $updates['provider_id'] = $appleId;
+            } elseif ($user->provider === 'apple' && empty($user->provider_id)) {
+                $updates['provider_id'] = $appleId;
+            }
+
+            if (empty($user->email_verified_at)) {
+                $updates['email_verified_at'] = now();
+            }
+
+            if (!empty($validated['name']) && empty($user->name)) {
+                $updates['name'] = trim($validated['name']);
+            }
+
+            if ($updates !== []) {
+                $user->update($updates);
+                $user->refresh();
+            }
+        } else {
+            $user = User::create([
+                'name' => !empty($validated['name'])
+                    ? trim($validated['name'])
+                    : explode('@', $email)[0],
+                'email' => $email,
+                'provider' => 'apple',
+                'provider_id' => $appleId,
+                'email_verified_at' => now(),
+                'password' => Hash::make(Str::random(32)),
+            ]);
+        }
+
+        $token = $user->createToken('mobile_auth_token')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Sign in with Apple successful',
+            'data' => [
+                'token' => $token,
+                'user' => new UserResource($user),
+            ],
+        ]);
+    }
+
+    protected function verifyAppleIdentityToken(string $identityToken): array|false
+    {
+        try {
+            $keySet = Cache::remember('apple-sign-in-public-keys', now()->addHours(6), function (): array {
+                return Http::timeout(10)
+                    ->retry(2, 200)
+                    ->get('https://appleid.apple.com/auth/keys')
+                    ->throw()
+                    ->json();
+            });
+
+            JWT::$leeway = 60;
+            $decoded = JWT::decode($identityToken, JWK::parseKeySet($keySet));
+            $payload = json_decode(json_encode($decoded, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
+
+            if (($payload['iss'] ?? null) !== 'https://appleid.apple.com') {
+                return false;
+            }
+
+            if (($payload['aud'] ?? null) !== config('services.apple.client_id')) {
+                return false;
+            }
+
+            if (empty($payload['sub'])) {
+                return false;
+            }
+
+            return $payload;
+        } catch (Throwable $error) {
+            Log::warning('Apple identity token verification failed', [
+                'message' => $error->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 
     /**

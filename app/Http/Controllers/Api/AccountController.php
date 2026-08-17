@@ -85,7 +85,7 @@ class AccountController extends Controller
             ], 422);
         }
 
-        if ($user->provider === 'google') {
+        if (in_array($user->provider, ['google', 'apple'], true)) {
             if (strcasecmp((string) ($validated['email'] ?? ''), (string) $user->email) !== 0) {
                 return $this->error('Enter your account email to confirm deletion.', [
                     'email' => ['Enter your account email to confirm deletion.'],

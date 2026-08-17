@@ -39,6 +39,7 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::prefix('auth')->group(function () {
     //    Route::post('/google', [SocialAuthController::class, 'googleAuth']);
     Route::post('/google', [SocialAuthController::class, 'googleMobileAuth']);
+    Route::post('/apple', [SocialAuthController::class, 'appleMobileAuth']);
     //    Route::get('/{provider}/redirect', [SocialAuthController::class, 'redirectToProvider']);
     //    Route::get('/{provider}/callback', [SocialAuthController::class, 'handleProviderCallback']);
 });
