@@ -6,12 +6,14 @@
                 <span class="text-sm text-gray-500">
                     Total Users: {{ $users->total() }}
                 </span>
-                <button onclick="openCreateUserModal()"
-                        class="bg-[#1FA774] text-white px-4 py-2 rounded-lg hover:bg-[#0D8B5E] transition flex items-center gap-2">                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                    </svg>
-                    Add User
-                </button>
+                @can('users.manage')
+                    <button onclick="openCreateUserModal()"
+                            class="bg-[#1FA774] text-white px-4 py-2 rounded-lg hover:bg-[#0D8B5E] transition flex items-center gap-2">                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
+                        Add User
+                    </button>
+                @endcan
             </div>
         </div>
     </x-slot>
@@ -67,7 +69,7 @@
                     <div class="flex items-center justify-between">
                         <div>
                             <p class="text-sm text-gray-500">Admins</p>
-                            <p class="text-2xl font-bold text-gray-800">{{ $users->where('role', 'admin')->count() }}</p>
+                            <p class="text-2xl font-bold text-gray-800">{{ $users->whereIn('role', ['super_admin', 'admin', 'moderator', 'support'])->count() }}</p>
                         </div>
                         <div class="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
                             <svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -98,8 +100,9 @@
                             <select name="role"
                                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1FA774] focus:border-transparent">
                                 <option value="">All Roles</option>
-                                <option value="user" {{ request('role') == 'user' ? 'selected' : '' }}>User</option>
-                                <option value="admin" {{ request('role') == 'admin' ? 'selected' : '' }}>Admin</option>
+                                @foreach($roles as $role)
+                                    <option value="{{ $role->slug }}" {{ request('role') == $role->slug ? 'selected' : '' }}>{{ $role->name }}</option>
+                                @endforeach
                             </select>
                         </div>
 
@@ -170,8 +173,8 @@
                                     <div class="text-sm text-gray-500">{{ $user->email_verified_at ? 'Verified' : 'Unverified' }}</div>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
-                                    <span class="px-2 py-1 text-xs rounded-full {{ $user->role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800' }}">
-                                        {{ ucfirst($user->role) }}
+                                    <span class="px-2 py-1 text-xs rounded-full {{ in_array($user->role, ['super_admin', 'admin']) ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800' }}">
+                                        {{ $user->roleDefinition?->name ?? ucfirst(str_replace('_', ' ', $user->role)) }}
                                     </span>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
@@ -199,27 +202,29 @@
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
                                             </svg>
                                         </a>
-                                        <a href="{{ route('admin.users.edit', $user) }}"
-                                           class="text-blue-600 hover:text-blue-800 transition">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                                            </svg>
-                                        </a>
-                                        @if(!$user->is_banned)
-                                            <button onclick="banUser('{{ $user->id }}')"
-                                                    class="text-red-600 hover:text-red-800 transition">
+                                        @can('users.manage')
+                                            <a href="{{ route('admin.users.edit', $user) }}"
+                                               class="text-blue-600 hover:text-blue-800 transition">
                                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
                                                 </svg>
-                                            </button>
-                                        @else
-                                            <button onclick="unbanUser('{{ $user->id }}')"
-                                                    class="text-green-600 hover:text-green-800 transition">
-                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                                </svg>
-                                            </button>
-                                        @endif
+                                            </a>
+                                            @if(!$user->is_banned)
+                                                <button onclick="banUser('{{ $user->id }}')"
+                                                        class="text-red-600 hover:text-red-800 transition">
+                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+                                                    </svg>
+                                                </button>
+                                            @else
+                                                <button onclick="unbanUser('{{ $user->id }}')"
+                                                        class="text-green-600 hover:text-green-800 transition">
+                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                    </svg>
+                                                </button>
+                                            @endif
+                                        @endcan
                                     </div>
                                 </td>
                             </tr>
@@ -291,6 +296,7 @@
     </div>
 
     <!-- CREATE USER MODAL -->
+    @can('users.manage')
     <div id="createUserModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50">
         <div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
 
@@ -314,8 +320,9 @@
                 <div>
                     <label class="text-sm text-gray-600">Role</label>
                     <select name="role" class="w-full border rounded-lg p-2">
-                        <option value="user">User</option>
-                        <option value="admin">Admin</option>
+                        @foreach($roles as $role)
+                            <option value="{{ $role->slug }}">{{ $role->name }}</option>
+                        @endforeach
                     </select>
                 </div>
 
@@ -349,6 +356,7 @@
             </form>
         </div>
     </div>
+    @endcan
 
     <script>
         function banUser(userId) {
@@ -362,7 +370,7 @@
         function unbanUser(userId) {
             const modal = document.getElementById('unbanModal');
             const form = document.getElementById('unbanForm');
-            form.action = `/admin/users/${userId}/unban`;
+            form.action = `/admin/users/${userId}/ban`;
             modal.classList.remove('hidden');
             modal.classList.add('flex');
         }

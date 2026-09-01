@@ -1,145 +1,3 @@
-{{--<x-app-layout>--}}
-{{--    <x-slot name="header">--}}
-{{--        <h2 class="font-semibold text-xl text-gray-800 leading-tight">--}}
-{{--            Dashboard Overview--}}
-{{--        </h2>--}}
-{{--    </x-slot>--}}
-
-{{--    <div class="p-6 space-y-6">--}}
-
-{{--        <!-- KPI CARDS -->--}}
-{{--        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">--}}
-{{--            <div class="bg-white p-5 rounded-2xl shadow">--}}
-{{--                <p class="text-gray-500 text-sm">Total Products</p>--}}
-{{--                <h2 class="text-2xl font-bold">{{ $totalProducts }}</h2>--}}
-{{--            </div>--}}
-
-{{--            <div class="bg-white p-5 rounded-2xl shadow">--}}
-{{--                <p class="text-gray-500 text-sm">Pending Contributions</p>--}}
-{{--                <h2 class="text-2xl font-bold text-red-500">{{ $pendingContributions }}</h2>--}}
-{{--            </div>--}}
-
-{{--            <div class="bg-white p-5 rounded-2xl shadow">--}}
-{{--                <p class="text-gray-500 text-sm">Approved Today</p>--}}
-{{--                <h2 class="text-2xl font-bold text-green-600">{{ $approvedToday }}</h2>--}}
-{{--            </div>--}}
-
-{{--            <div class="bg-white p-5 rounded-2xl shadow">--}}
-{{--                <p class="text-gray-500 text-sm">Total Users</p>--}}
-{{--                <h2 class="text-2xl font-bold">{{ $totalUsers }}</h2>--}}
-{{--            </div>--}}
-{{--        </div>--}}
-
-{{--        <!-- CHARTS SECTION -->--}}
-{{--        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">--}}
-{{--            <div class="bg-white p-5 rounded-2xl shadow">--}}
-{{--                <h3 class="font-semibold mb-4">Contributions Trend</h3>--}}
-{{--                <canvas id="contributionsChart"></canvas>--}}
-{{--            </div>--}}
-
-{{--            <div class="bg-white p-5 rounded-2xl shadow">--}}
-{{--                <h3 class="font-semibold mb-4">User Growth</h3>--}}
-{{--                <canvas id="usersChart"></canvas>--}}
-{{--            </div>--}}
-{{--        </div>--}}
-
-{{--        <!-- TABLES SECTION -->--}}
-{{--        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">--}}
-
-{{--            <!-- Recent Contributions -->--}}
-{{--            <div class="bg-white p-5 rounded-2xl shadow">--}}
-{{--                <h3 class="font-semibold mb-4">Recent Contributions</h3>--}}
-{{--                <div class="overflow-x-auto">--}}
-{{--                    <table class="w-full text-sm">--}}
-{{--                        <thead>--}}
-{{--                        <tr class="text-left text-gray-500 border-b">--}}
-{{--                            <th class="py-2">User</th>--}}
-{{--                            <th>Product</th>--}}
-{{--                            <th>Status</th>--}}
-{{--                        </tr>--}}
-{{--                        </thead>--}}
-{{--                        <tbody>--}}
-{{--                        @forelse($recentContributions ?? [] as $item)--}}
-{{--                            <tr class="border-b">--}}
-{{--                                <td class="py-2">{{ $item->user->name ?? 'N/A' }}</td>--}}
-{{--                                <td>{{ $item->product_name ?? 'N/A' }}</td>--}}
-{{--                                <td>--}}
-{{--                                        <span class="px-2 py-1 rounded text-xs--}}
-{{--                                            {{ $item->status == 'pending' ? 'bg-yellow-100 text-yellow-700' : '' }}--}}
-{{--                                            {{ $item->status == 'approved' ? 'bg-green-100 text-green-700' : '' }}--}}
-{{--                                            {{ $item->status == 'rejected' ? 'bg-red-100 text-red-700' : '' }}--}}
-{{--                                        ">--}}
-{{--                                            {{ ucfirst($item->status) }}--}}
-{{--                                        </span>--}}
-{{--                                </td>--}}
-{{--                            </tr>--}}
-{{--                        @empty--}}
-{{--                            <tr>--}}
-{{--                                <td colspan="3" class="py-4 text-center text-gray-400">No data</td>--}}
-{{--                            </tr>--}}
-{{--                        @endforelse--}}
-{{--                        </tbody>--}}
-{{--                    </table>--}}
-{{--                </div>--}}
-{{--            </div>--}}
-
-{{--            <!-- System Activity Feed -->--}}
-{{--            <div class="bg-white p-5 rounded-2xl shadow">--}}
-{{--                <h3 class="font-semibold mb-4">Activity Feed</h3>--}}
-{{--                <div class="space-y-3 max-h-64 overflow-y-auto">--}}
-{{--                    @forelse($activityFeed ?? [] as $activity)--}}
-{{--                        <div class="text-sm border-b pb-2">--}}
-{{--                            <p class="text-gray-700">{{ $activity->message }}</p>--}}
-{{--                            <span class="text-xs text-gray-400">{{ $activity->time }}</span>--}}
-{{--                        </div>--}}
-{{--                    @empty--}}
-{{--                        <p class="text-gray-400 text-sm">No recent activity</p>--}}
-{{--                    @endforelse--}}
-{{--                </div>--}}
-{{--            </div>--}}
-
-{{--        </div>--}}
-
-{{--    </div>--}}
-
-{{--    <!-- Chart.js -->--}}
-{{--    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>--}}
-{{--    <script>--}}
-{{--        const usersCtx = document.getElementById('usersChart');--}}
-
-{{--        new Chart(usersCtx, {--}}
-{{--            type: 'line',--}}
-{{--            data: {--}}
-{{--                labels: @json($userGrowthChart->pluck('date')),--}}
-{{--                datasets: [{--}}
-{{--                    label: 'New Users',--}}
-{{--                    data: @json($userGrowthChart->pluck('count')),--}}
-{{--                    borderWidth: 2,--}}
-{{--                    tension: 0.4--}}
-{{--                }]--}}
-{{--            }--}}
-{{--        });--}}
-{{--    </script>--}}
-{{--    <script>--}}
-{{--        const ctx = document.getElementById('contributionsChart');--}}
-
-{{--        new Chart(ctx, {--}}
-{{--            type: 'line',--}}
-{{--            data: {--}}
-{{--                labels: @json($contributionsChart->pluck('date')),--}}
-{{--                datasets: [{--}}
-{{--                    label: 'Contributions',--}}
-{{--                    data: @json($contributionsChart->pluck('count')),--}}
-{{--                    borderWidth: 2,--}}
-{{--                    tension: 0.4--}}
-{{--                }]--}}
-{{--            }--}}
-{{--        });--}}
-{{--    </script>--}}
-
-{{--</x-app-layout>--}}
-
-
 <x-app-layout>
     <x-slot name="header">
         <div class="flex justify-between items-center">
@@ -154,10 +12,7 @@
 
     <div class="py-6">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-
-            <!-- KPI CARDS -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <!-- Total Products Card -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-[#1FA774] hover:shadow-md transition">
                     <div class="flex items-center justify-between">
                         <div>
@@ -173,7 +28,6 @@
                     </div>
                 </div>
 
-                <!-- Pending Contributions Card -->
                 <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-yellow-500 hover:shadow-md transition">
                     <div class="flex items-center justify-between">
                         <div>
@@ -189,7 +43,6 @@
                     </div>
                 </div>
 
-                <!-- Approved Today Card -->
                 <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-green-500 hover:shadow-md transition">
                     <div class="flex items-center justify-between">
                         <div>
@@ -205,7 +58,6 @@
                     </div>
                 </div>
 
-                <!-- Total Users Card -->
                 <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-purple-500 hover:shadow-md transition">
                     <div class="flex items-center justify-between">
                         <div>
@@ -220,11 +72,39 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-sky-500 hover:shadow-md transition">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500 mb-1">Notifications Sent</p>
+                            <p class="text-2xl font-bold text-sky-600">{{ $notificationsSentToday ?? 0 }}</p>
+                            <p class="text-xs text-gray-400 mt-2">{{ $scheduledNotifications ?? 0 }} scheduled</p>
+                        </div>
+                        <div class="w-12 h-12 bg-sky-50 rounded-xl flex items-center justify-center">
+                            <svg class="w-6 h-6 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 11-6 0m6 0H9"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-amber-500 hover:shadow-md transition">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500 mb-1">Open Support Cases</p>
+                            <p class="text-2xl font-bold text-amber-600">{{ $openSupportCases ?? 0 }}</p>
+                            <p class="text-xs text-gray-400 mt-2">Complaints, tickets, chats, bugs</p>
+                        </div>
+                        <div class="w-12 h-12 bg-amber-50 rounded-xl flex items-center justify-center">
+                            <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5m-9 7h16a2 2 0 002-2V7a2 2 0 00-2-2h-3l-2-2H9L7 5H4a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <!-- CHARTS SECTION -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <!-- Contributions Chart -->
                 <div class="bg-white rounded-xl shadow-sm p-6">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="font-semibold text-gray-800">Contributions Trend</h3>
@@ -238,7 +118,6 @@
                     </div>
                 </div>
 
-                <!-- User Growth Chart -->
                 <div class="bg-white rounded-xl shadow-sm p-6">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="font-semibold text-gray-800">User Growth</h3>
@@ -253,16 +132,13 @@
                 </div>
             </div>
 
-            <!-- TABLES SECTION -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <!-- Recent Contributions Table -->
                 <div class="bg-white rounded-xl shadow-sm overflow-hidden">
                     <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
                         <h3 class="font-semibold text-gray-800">Recent Contributions</h3>
                         @if(isset($recentContributions) && $recentContributions->count() > 0)
-{{--                            <a href="{{ route('admin.contributions') }}" class="text-xs text-[#1FA774] hover:text-[#0D8B5E] font-medium">--}}
-                            <a href="#" class="text-xs text-[#1FA774] hover:text-[#0D8B5E] font-medium">
-                                View All →
+                            <a href="{{ route('admin.contributions.index') }}" class="text-xs text-[#1FA774] hover:text-[#0D8B5E] font-medium">
+                                View all ->
                             </a>
                         @endif
                     </div>
@@ -294,18 +170,16 @@
                                         </div>
                                     </td>
                                     <td class="px-6 py-3">
-                                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
-                                                {{ $item->status == 'pending' ? 'bg-yellow-100 text-yellow-700' : '' }}
-                                                {{ $item->status == 'approved' ? 'bg-green-100 text-green-700' : '' }}
-                                                {{ $item->status == 'rejected' ? 'bg-red-100 text-red-700' : '' }}
-                                            ">
-                                                <span class="w-1.5 h-1.5 rounded-full mr-1
-                                                    {{ $item->status == 'pending' ? 'bg-yellow-500' : '' }}
-                                                    {{ $item->status == 'approved' ? 'bg-green-500' : '' }}
-                                                    {{ $item->status == 'rejected' ? 'bg-red-500' : '' }}
-                                                "></span>
-                                                {{ ucfirst($item->status) }}
-                                            </span>
+                                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
+                                            {{ $item->status == 'pending' ? 'bg-yellow-100 text-yellow-700' : '' }}
+                                            {{ $item->status == 'approved' ? 'bg-green-100 text-green-700' : '' }}
+                                            {{ $item->status == 'rejected' ? 'bg-red-100 text-red-700' : '' }}">
+                                            <span class="w-1.5 h-1.5 rounded-full mr-1
+                                                {{ $item->status == 'pending' ? 'bg-yellow-500' : '' }}
+                                                {{ $item->status == 'approved' ? 'bg-green-500' : '' }}
+                                                {{ $item->status == 'rejected' ? 'bg-red-500' : '' }}"></span>
+                                            {{ ucfirst($item->status) }}
+                                        </span>
                                     </td>
                                     <td class="px-6 py-3 text-sm text-gray-500">
                                         {{ isset($item->created_at) ? $item->created_at->diffForHumans() : 'N/A' }}
@@ -326,7 +200,6 @@
                     </div>
                 </div>
 
-                <!-- Activity Feed -->
                 <div class="bg-white rounded-xl shadow-sm overflow-hidden">
                     <div class="px-6 py-4 border-b border-gray-100">
                         <h3 class="font-semibold text-gray-800">Recent Activity</h3>
@@ -335,16 +208,28 @@
                         @forelse($activityFeed ?? [] as $activity)
                             <div class="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                 <div class="flex-shrink-0">
-                                    @if($activity->type ?? 'default' == 'contribution')
+                                    @if(($activity->type ?? 'default') === 'contribution')
                                         <div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
                                             <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                                             </svg>
                                         </div>
-                                    @elseif($activity->type ?? 'default' == 'user')
+                                    @elseif(($activity->type ?? 'default') === 'user')
                                         <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                                             <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                                            </svg>
+                                        </div>
+                                    @elseif(($activity->type ?? 'default') === 'notification')
+                                        <div class="w-8 h-8 bg-sky-100 rounded-full flex items-center justify-center">
+                                            <svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 11-6 0m6 0H9"></path>
+                                            </svg>
+                                        </div>
+                                    @elseif(($activity->type ?? 'default') === 'support')
+                                        <div class="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center">
+                                            <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5m-9 7h16a2 2 0 002-2V7a2 2 0 00-2-2h-3l-2-2H9L7 5H4a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                                             </svg>
                                         </div>
                                     @else
@@ -372,10 +257,77 @@
                 </div>
             </div>
 
-            <!-- Quick Actions -->
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                    <div>
+                        <h3 class="font-semibold text-gray-800">Top Contributors</h3>
+                        <p class="text-xs text-gray-500 mt-1">Most trusted contributors by approval history and reputation</p>
+                    </div>
+                    <a href="{{ route('admin.leaderboard.index') }}" class="text-xs text-[#1FA774] hover:text-[#0D8B5E] font-medium">
+                        Full leaderboard ->
+                    </a>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50">
+                        <tr class="text-left text-gray-500">
+                            <th class="px-6 py-3 text-xs font-medium">Rank</th>
+                            <th class="px-6 py-3 text-xs font-medium">Contributor</th>
+                            <th class="px-6 py-3 text-xs font-medium">Level</th>
+                            <th class="px-6 py-3 text-xs font-medium">Approvals</th>
+                            <th class="px-6 py-3 text-xs font-medium text-right">Points</th>
+                        </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                        @forelse($topContributors ?? [] as $contributor)
+                            <tr class="hover:bg-gray-50 transition">
+                                <td class="px-6 py-4">
+                                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-semibold
+                                        {{ $contributor->rank === 1 ? 'bg-yellow-100 text-yellow-700' : ($contributor->rank === 2 ? 'bg-gray-100 text-gray-700' : ($contributor->rank === 3 ? 'bg-orange-100 text-orange-700' : 'bg-emerald-50 text-emerald-700')) }}">
+                                        {{ $contributor->rank }}
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4">
+                                    <div class="flex items-center space-x-3">
+                                        <div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-semibold text-gray-700 overflow-hidden">
+                                            @if($contributor->avatar)
+                                                <img src="{{ $contributor->avatar }}" alt="{{ $contributor->name }}" class="w-full h-full object-cover">
+                                            @else
+                                                {{ strtoupper(substr($contributor->name, 0, 1)) }}
+                                            @endif
+                                        </div>
+                                        <div>
+                                            <p class="font-medium text-gray-900">{{ $contributor->name }}</p>
+                                            <p class="text-xs text-gray-500">{{ $contributor->email }}</p>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="px-6 py-4">
+                                    <span class="inline-flex px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium">
+                                        {{ $contributor->level }}
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4 text-gray-700">
+                                    {{ number_format($contributor->approved_contributions_count) }}
+                                </td>
+                                <td class="px-6 py-4 text-right font-semibold text-gray-900">
+                                    {{ number_format($contributor->reputation_points) }}
+                                </td>
+                            </tr>
+                        @empty
+                            <tr>
+                                <td colspan="5" class="px-6 py-10 text-center text-gray-500">
+                                    No contributor data yet.
+                                </td>
+                            </tr>
+                        @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-{{--                <a href="{{ route('admin.contributions', ['status' => 'pending']) }}"--}}
-                <a href="#"
+                <a href="{{ route('admin.contributions.index', ['status' => 'pending']) }}"
                    class="bg-gradient-to-r from-yellow-500 to-yellow-600 rounded-xl shadow-sm p-6 text-white hover:shadow-md transition">
                     <div class="flex items-center justify-between">
                         <div>
@@ -386,7 +338,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                         </svg>
                     </div>
-                    <p class="text-sm mt-2 opacity-90">Review pending contributions →</p>
+                    <p class="text-sm mt-2 opacity-90">Review pending contributions -></p>
                 </a>
 
                 <a href="{{ route('admin.users.index') }}"
@@ -400,11 +352,10 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
                         </svg>
                     </div>
-                    <p class="text-sm mt-2 opacity-90">Manage users →</p>
+                    <p class="text-sm mt-2 opacity-90">Manage users -></p>
                 </a>
 
-{{--                <a href="{{ route('admin.products.index') }}"--}}
-                <a href="#"
+                <a href="{{ route('admin.products.index') }}"
                    class="bg-gradient-to-r from-purple-500 to-purple-600 rounded-xl shadow-sm p-6 text-white hover:shadow-md transition">
                     <div class="flex items-center justify-between">
                         <div>
@@ -415,17 +366,47 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
                         </svg>
                     </div>
-                    <p class="text-sm mt-2 opacity-90">Browse products →</p>
+                    <p class="text-sm mt-2 opacity-90">Browse products -></p>
                 </a>
+
+                @can('notifications.view')
+                    <a href="{{ route('admin.notifications.index') }}"
+                       class="bg-gradient-to-r from-sky-500 to-cyan-600 rounded-xl shadow-sm p-6 text-white hover:shadow-md transition">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm opacity-90 mb-1">Notifications</p>
+                                <p class="text-2xl font-bold">{{ $notificationsSentToday ?? 0 }}</p>
+                            </div>
+                            <svg class="w-8 h-8 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 11-6 0m6 0H9"></path>
+                            </svg>
+                        </div>
+                        <p class="text-sm mt-2 opacity-90">Manage campaigns -></p>
+                    </a>
+                @endcan
+
+                @can('support.view')
+                    <a href="{{ route('admin.support.index') }}"
+                       class="bg-gradient-to-r from-amber-500 to-orange-600 rounded-xl shadow-sm p-6 text-white hover:shadow-md transition">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm opacity-90 mb-1">Support Cases</p>
+                                <p class="text-2xl font-bold">{{ $openSupportCases ?? 0 }}</p>
+                            </div>
+                            <svg class="w-8 h-8 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5m-9 7h16a2 2 0 002-2V7a2 2 0 00-2-2h-3l-2-2H9L7 5H4a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                            </svg>
+                        </div>
+                        <p class="text-sm mt-2 opacity-90">Handle support queue -></p>
+                    </a>
+                @endcan
             </div>
         </div>
     </div>
 
-    <!-- Chart.js Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Contributions Chart
             const contributionsCtx = document.getElementById('contributionsChart');
             if (contributionsCtx) {
                 new Chart(contributionsCtx, {
@@ -479,7 +460,6 @@
                 });
             }
 
-            // Users Growth Chart
             const usersCtx = document.getElementById('usersChart');
             if (usersCtx) {
                 new Chart(usersCtx, {

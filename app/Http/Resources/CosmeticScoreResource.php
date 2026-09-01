@@ -22,6 +22,10 @@ class CosmeticScoreResource extends JsonResource
             'environmental_score' => $this->environmental_score,
             'safety_level' => $this->safety_level,
             'score_breakdown' => $this->score_breakdown,
+            'analysis' => data_get($this->score_breakdown, 'analysis', [
+                'negatives' => [],
+                'positives' => [],
+            ]),
             'explanation_text' => $this->explanation_text,
             'warnings' => $this->warnings,
             'benefits' => $this->benefits,

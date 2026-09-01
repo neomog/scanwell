@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>ScanWell - Smart Product Scanner & Health Analyzer</title>
-    <meta name="description" content="Scan product barcodes, analyze ingredients, get health scores, and make informed purchasing decisions with ScanWell.">
+    <title>LabelWise - Smart Product Scanner & Health Analyzer</title>
+    <meta name="description" content="Scan product barcodes, analyze ingredients, get health scores, and make informed purchasing decisions with LabelWise.">
 
     <!-- Fonts & Tailwind CDN (fully standalone, no build deps needed) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -93,7 +93,7 @@
                         <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
                     </svg>
                 </div>
-                <span class="text-xl font-extrabold tracking-tight text-gray-900">ScanWell</span>
+                <span class="text-xl font-extrabold tracking-tight text-gray-900">LabelWise</span>
             </div>
 
             <!-- Desktop Navigation Links -->
@@ -153,7 +153,7 @@
                 </h1>
 
                 <p class="text-lg text-gray-600 mb-8 leading-relaxed max-w-lg">
-                    Instantly analyze product ingredients, get comprehensive health scores, and make informed purchasing decisions with ScanWell's advanced scanning technology.
+                    Instantly analyze product ingredients, get comprehensive health scores, and make informed purchasing decisions with LabelWise's advanced scanning technology.
                 </p>
 
                 <div class="flex flex-col sm:flex-row gap-4">
@@ -193,7 +193,7 @@
                                 <div class="w-3 h-3 rounded-full bg-white/30"></div>
                                 <div class="w-3 h-3 rounded-full bg-white/30"></div>
                                 <div class="w-3 h-3 rounded-full bg-white/30"></div>
-                                <span class="text-white text-xs font-mono ml-2">ScanWell Scanner</span>
+                                <span class="text-white text-xs font-mono ml-2">LabelWise Scanner</span>
                             </div>
                             <div class="p-5 bg-white">
                                 <div class="flex items-center space-x-3 mb-4">
@@ -244,7 +244,7 @@
 <!-- How It Works -->
 <section id="how-it-works" class="py-20 bg-white">
     <div class="max-w-7xl mx-auto px-5 sm:px-8 lg:px-10">
-        <div class="text-center mb-16"><h2 class="text-3xl md:text-4xl font-extrabold text-gray-900">How ScanWell Works</h2><p class="text-lg text-gray-600 max-w-2xl mx-auto mt-3">Get started in three simple steps and start making healthier choices today</p></div>
+        <div class="text-center mb-16"><h2 class="text-3xl md:text-4xl font-extrabold text-gray-900">How LabelWise Works</h2><p class="text-lg text-gray-600 max-w-2xl mx-auto mt-3">Get started in three simple steps and start making healthier choices today</p></div>
         <div class="grid md:grid-cols-3 gap-12 text-center">
             <div><div class="relative"><div class="w-20 h-20 bg-gradient-to-br from-[#1FA774] to-[#0D8B5E] rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg"><span class="text-white text-2xl font-bold">1</span></div><div class="hidden md:block absolute top-10 left-1/2 w-full h-0.5 bg-gray-200 -z-0"></div></div><h3 class="text-xl font-bold text-gray-900 mb-2">Create Account</h3><p class="text-gray-600">Sign up for free and join our community of health-conscious consumers</p></div>
             <div><div class="w-20 h-20 bg-gradient-to-br from-[#1FA774] to-[#0D8B5E] rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg"><span class="text-white text-2xl font-bold">2</span></div><h3 class="text-xl font-bold text-gray-900 mb-2">Scan Any Product</h3><p class="text-gray-600">Simply point your camera at any product barcode to get instant analysis</p></div>
@@ -270,7 +270,7 @@
     <div class="max-w-7xl mx-auto px-5 sm:px-8 lg:px-10">
         <div class="text-center mb-14"><h2 class="text-3xl md:text-4xl font-extrabold text-gray-900">What Our Users Say</h2><p class="text-gray-600 text-lg mt-2">Join thousands of satisfied users who transformed their shopping habits</p></div>
         <div class="grid md:grid-cols-3 gap-8">
-            <div class="bg-gray-50 rounded-2xl p-7 shadow-sm"><div class="flex text-[#1FA774] mb-4">★★★★★</div><p class="text-gray-700 mb-5 leading-relaxed">"ScanWell has completely changed how I shop for groceries. I can now easily identify products with harmful ingredients and make healthier choices for my family."</p><div class="flex items-center"><div class="w-10 h-10 rounded-full bg-[#1FA774]/20 flex items-center justify-center font-bold text-[#1FA774]">JD</div><div class="ml-3"><p class="font-bold text-gray-900">John Doe</p><p class="text-sm text-gray-500">Health Enthusiast</p></div></div></div>
+            <div class="bg-gray-50 rounded-2xl p-7 shadow-sm"><div class="flex text-[#1FA774] mb-4">★★★★★</div><p class="text-gray-700 mb-5 leading-relaxed">"LabelWise has completely changed how I shop for groceries. I can now easily identify products with harmful ingredients and make healthier choices for my family."</p><div class="flex items-center"><div class="w-10 h-10 rounded-full bg-[#1FA774]/20 flex items-center justify-center font-bold text-[#1FA774]">JD</div><div class="ml-3"><p class="font-bold text-gray-900">John Doe</p><p class="text-sm text-gray-500">Health Enthusiast</p></div></div></div>
             <div class="bg-gray-50 rounded-2xl p-7 shadow-sm"><div class="flex text-[#1FA774] mb-4">★★★★☆</div><p class="text-gray-700 mb-5 leading-relaxed">"The ingredient analysis feature is incredibly detailed. I love how it highlights potential allergens and gives clear explanations about each ingredient."</p><div class="flex items-center"><div class="w-10 h-10 rounded-full bg-[#1FA774]/20 flex items-center justify-center font-bold text-[#1FA774]">JS</div><div class="ml-3"><p class="font-bold text-gray-900">Jane Smith</p><p class="text-sm text-gray-500">Nutrition Coach</p></div></div></div>
             <div class="bg-gray-50 rounded-2xl p-7 shadow-sm"><div class="flex text-[#1FA774] mb-4">★★★★★</div><p class="text-gray-700 mb-5 leading-relaxed">"Fast, accurate, and incredibly useful. The community contribution feature makes it even better as we all help each other make informed decisions."</p><div class="flex items-center"><div class="w-10 h-10 rounded-full bg-[#1FA774]/20 flex items-center justify-center font-bold text-[#1FA774]">MB</div><div class="ml-3"><p class="font-bold text-gray-900">Mike Brown</p><p class="text-sm text-gray-500">Regular User</p></div></div></div>
         </div>
@@ -285,8 +285,8 @@
 <!-- Footer -->
 <footer class="bg-gray-900 text-gray-400 py-12">
     <div class="max-w-7xl mx-auto px-5 sm:px-8 lg:px-10">
-        <div class="grid md:grid-cols-4 gap-8 mb-8"><div><div class="flex items-center space-x-2 mb-4"><div class="w-8 h-8 bg-gradient-to-br from-[#1FA774] to-[#0D8B5E] rounded-lg flex items-center justify-center"><svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg></div><span class="text-xl font-bold text-white">ScanWell</span></div><p class="text-sm">Making healthy choices easier, one scan at a time.</p></div><div><h3 class="text-white font-bold mb-4">Product</h3><ul class="space-y-2 text-sm"><li><a href="#features" class="hover:text-white transition">Features</a></li><li><a href="#pricing" class="hover:text-white transition">Pricing</a></li><li><a href="#" class="hover:text-white transition">Download</a></li></ul></div><div><h3 class="text-white font-bold mb-4">Company</h3><ul class="space-y-2 text-sm"><li><a href="#" class="hover:text-white transition">About Us</a></li><li><a href="#" class="hover:text-white transition">Blog</a></li><li><a href="#" class="hover:text-white transition">Careers</a></li></ul></div><div><h3 class="text-white font-bold mb-4">Legal</h3><ul class="space-y-2 text-sm"><li><a href="#" class="hover:text-white transition">Privacy Policy</a></li><li><a href="#" class="hover:text-white transition">Terms of Service</a></li><li><a href="#" class="hover:text-white transition">Cookie Policy</a></li></ul></div></div>
-        <div class="border-t border-gray-800 pt-8 text-center text-sm"><p>&copy; 2025 ScanWell. All rights reserved.</p></div>
+        <div class="grid md:grid-cols-4 gap-8 mb-8"><div><div class="flex items-center space-x-2 mb-4"><div class="w-8 h-8 bg-gradient-to-br from-[#1FA774] to-[#0D8B5E] rounded-lg flex items-center justify-center"><svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg></div><span class="text-xl font-bold text-white">LabelWise</span></div><p class="text-sm">Making healthy choices easier, one scan at a time.</p></div><div><h3 class="text-white font-bold mb-4">Product</h3><ul class="space-y-2 text-sm"><li><a href="#features" class="hover:text-white transition">Features</a></li><li><a href="#pricing" class="hover:text-white transition">Pricing</a></li><li><a href="#" class="hover:text-white transition">Download</a></li></ul></div><div><h3 class="text-white font-bold mb-4">Company</h3><ul class="space-y-2 text-sm"><li><a href="#" class="hover:text-white transition">About Us</a></li><li><a href="#" class="hover:text-white transition">Blog</a></li><li><a href="#" class="hover:text-white transition">Careers</a></li></ul></div><div><h3 class="text-white font-bold mb-4">Legal</h3><ul class="space-y-2 text-sm"><li><a href="#" class="hover:text-white transition">Privacy Policy</a></li><li><a href="#" class="hover:text-white transition">Terms of Service</a></li><li><a href="#" class="hover:text-white transition">Cookie Policy</a></li></ul></div></div>
+        <div class="border-t border-gray-800 pt-8 text-center text-sm"><p>&copy; 2026 LabelWise. All rights reserved.</p></div>
     </div>
 </footer>
 </body>

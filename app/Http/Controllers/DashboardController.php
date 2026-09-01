@@ -2,169 +2,158 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\NotificationCampaign;
 use App\Models\Product;
 use App\Models\ProductContribution;
+use App\Models\SupportCase;
 use App\Models\User;
-use Illuminate\Support\Facades\Cache;
+use App\Services\ContributionReputationService;
+use App\Services\ProductContributionService;
 use Carbon\Carbon;
 
 class DashboardController extends Controller
 {
-//    public function index()
-//    {
-//        $stats = Cache::remember('dashboard.stats', 60, function () {
-//
-//            // ========== KPI CARDS ==========
-//            $totalProducts = Product::count();
-//
-//            $pendingContributions = ProductContribution::where('status', 'pending')->count();
-//
-//            $approvedToday = ProductContribution::where('status', 'approved')
-//                ->whereDate('updated_at', Carbon::today())
-//                ->count();
-//
-//            $totalUsers = User::count();
-//
-//            // ========== CHART DATA ==========
-//            $contributionsChart = ProductContribution::selectRaw('DATE(created_at) as date, COUNT(*) as count')
-//                ->where('created_at', '>=', Carbon::now()->subDays(7))
-//                ->groupBy('date')
-//                ->orderBy('date')
-//                ->get();
-//
-//            // ========== RECENT CONTRIBUTIONS ==========
-//            $recentContributions = ProductContribution::with('user')
-//                ->latest()
-//                ->limit(10)
-//                ->get();
-//
-//            // ========== ACTIVITY FEED ==========
-//            $activityFeed = collect();
-//
-//            // Recent contributions activity
-//            foreach ($recentContributions as $item) {
-//                $activityFeed->push((object)[
-//                    'message' => ($item->user->name ?? 'Someone') . ' submitted a contribution',
-//                    'time' => $item->created_at->diffForHumans(),
-//                ]);
-//            }
-//
-//            // Recent approvals
-//            $recentApproved = ProductContribution::where('status', 'approved')
-//                ->latest('updated_at')
-//                ->limit(5)
-//                ->get();
-//
-//            foreach ($recentApproved as $item) {
-//                $activityFeed->push((object)[
-//                    'message' => 'A contribution was approved',
-//                    'time' => $item->updated_at->diffForHumans(),
-//                ]);
-//            }
-//
-//            // Sort activity by latest
-//            $activityFeed = $activityFeed->sortByDesc('time')->values();
-//
-//            // ========== USER GROWTH CHART ==========
-//            $userGrowthChart = User::selectRaw('DATE(created_at) as date, COUNT(*) as count')
-//                ->where('created_at', '>=', Carbon::now()->subDays(30))
-//                ->groupBy('date')
-//                ->orderBy('date')
-//                ->get();
-//
-//
-//            return [
-//                'totalProducts' => $totalProducts,
-//                'pendingContributions' => $pendingContributions,
-//                'approvedToday' => $approvedToday,
-//                'totalUsers' => $totalUsers,
-//                'contributionsChart' => $contributionsChart,
-//                'recentContributions' => $recentContributions,
-//                'activityFeed' => $activityFeed,
-//                'userGrowthChart' => $userGrowthChart,
-//            ];
-//        });
-//
-//        return view('dashboard', $stats);
-//    }
+    public function __construct(
+        protected ContributionReputationService $contributionReputationService,
+        protected ProductContributionService $productContributionService
+    ) {
+    }
+
     public function index()
     {
-        // Basic Stats
         $totalProducts = Product::count();
-        $pendingContributions = productContribution::where('status', 'pending')->count();
-        $approvedToday = productContribution::where('status', 'approved')
-            ->whereDate('created_at', Carbon::today())
+        $pendingContributions = ProductContribution::where('status', 'pending')->count();
+        $approvedToday = ProductContribution::where('status', 'approved')
+            ->whereDate('updated_at', Carbon::today())
             ->count();
         $totalUsers = User::count();
+        $notificationsSentToday = NotificationCampaign::whereDate('sent_at', Carbon::today())->count();
+        $scheduledNotifications = NotificationCampaign::where('status', NotificationCampaign::STATUS_SCHEDULED)->count();
+        $openSupportCases = SupportCase::whereIn('status', [
+            SupportCase::STATUS_OPEN,
+            SupportCase::STATUS_PENDING_SUPPORT,
+            SupportCase::STATUS_PENDING_USER,
+        ])->count();
 
-        // Chart Data - Last 7 days
         $contributionsChart = collect();
         $userGrowthChart = collect();
 
         for ($i = 6; $i >= 0; $i--) {
             $date = Carbon::today()->subDays($i);
 
-            // Contributions data
-            $contributionsChart->push((object)[
+            $contributionsChart->push((object) [
                 'date' => $date->format('M d'),
-                'count' => productContribution::whereDate('created_at', $date)->count()
+                'count' => ProductContribution::whereDate('created_at', $date)->count(),
             ]);
 
-            // Users data
-            $userGrowthChart->push((object)[
+            $userGrowthChart->push((object) [
                 'date' => $date->format('M d'),
-                'count' => User::whereDate('created_at', $date)->count()
+                'count' => User::whereDate('created_at', $date)->count(),
             ]);
         }
 
-        // Recent Contributions
-        $recentContributions = productContribution::with('user')
+        $recentContributions = ProductContribution::with('user')
             ->latest()
             ->take(5)
             ->get();
 
-        // Activity Feed (combine recent contributions and user registrations)
         $recentActivities = collect();
 
-        // Add recent contributions to activity feed
-        productContribution::with('user')
+        ProductContribution::with('user')
             ->latest()
             ->take(10)
             ->get()
-            ->each(function ($contribution) use (&$recentActivities) {
-                $recentActivities->push((object)[
-                    'message' => $contribution->user->name . ' submitted a ' . $contribution->change_type . ' contribution for ' . ($contribution->product_name ?? 'a product'),
+            ->each(function (ProductContribution $contribution) use ($recentActivities) {
+                $recentActivities->push((object) [
+                    'message' => ($contribution->user?->name ?? 'Someone') . ' submitted a '
+                        . $contribution->change_type . ' contribution for '
+                        . ($contribution->product_name ?? 'a product'),
                     'time' => $contribution->created_at->diffForHumans(),
-                    'type' => 'contribution'
+                    'type' => 'contribution',
+                    'timestamp' => $contribution->created_at->timestamp,
                 ]);
             });
 
-        // Add recent user registrations to activity feed
         User::latest()
             ->take(10)
             ->get()
-            ->each(function ($user) use (&$recentActivities) {
-                $recentActivities->push((object)[
+            ->each(function (User $user) use ($recentActivities) {
+                $recentActivities->push((object) [
                     'message' => 'New user registered: ' . $user->name,
                     'time' => $user->created_at->diffForHumans(),
-                    'type' => 'user'
+                    'type' => 'user',
+                    'timestamp' => $user->created_at->timestamp,
                 ]);
             });
 
-        // Sort by time (most recent first) and take top 10
-        $activityFeed = $recentActivities->sortByDesc(function($activity) {
-            return strtotime($activity->time);
-        })->take(10);
+        NotificationCampaign::with('creator')
+            ->latest()
+            ->take(10)
+            ->get()
+            ->each(function (NotificationCampaign $campaign) use ($recentActivities) {
+                $recentActivities->push((object) [
+                    'message' => ($campaign->creator?->name ?? 'An admin') . ' published '
+                        . $campaign->type . ': '
+                        . $campaign->title,
+                    'time' => $campaign->created_at->diffForHumans(),
+                    'type' => 'notification',
+                    'timestamp' => $campaign->created_at->timestamp,
+                ]);
+            });
+
+        SupportCase::with('user')
+            ->latest('last_message_at')
+            ->take(10)
+            ->get()
+            ->each(function (SupportCase $case) use ($recentActivities) {
+                $recentActivities->push((object) [
+                    'message' => ($case->user?->name ?? 'A user') . ' opened a '
+                        . str_replace('_', ' ', $case->type) . ' case: '
+                        . $case->subject,
+                    'time' => ($case->last_message_at ?? $case->created_at)->diffForHumans(),
+                    'type' => 'support',
+                    'timestamp' => ($case->last_message_at ?? $case->created_at)->timestamp,
+                ]);
+            });
+
+        $activityFeed = $recentActivities
+            ->sortByDesc('timestamp')
+            ->take(10)
+            ->values();
+
+        $topContributors = $this->productContributionService->leaderboardBaseQuery()
+            ->orderByDesc('reputation_points')
+            ->orderByDesc('approved_contributions_count')
+            ->orderByDesc('contributions_count')
+            ->take(5)
+            ->get()
+            ->values()
+            ->map(function (User $user, int $index) {
+                return (object) [
+                    'rank' => $index + 1,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'avatar' => $user->avatar,
+                    'reputation_points' => (int) $user->reputation_points,
+                    'approved_contributions_count' => (int) $user->approved_contributions_count,
+                    'rejected_contributions_count' => (int) $user->rejected_contributions_count,
+                    'level' => $this->contributionReputationService->levelForPoints((int) $user->reputation_points),
+                ];
+            });
 
         return view('dashboard', compact(
             'totalProducts',
             'pendingContributions',
             'approvedToday',
             'totalUsers',
+            'notificationsSentToday',
+            'scheduledNotifications',
+            'openSupportCases',
             'contributionsChart',
             'userGrowthChart',
             'recentContributions',
-            'activityFeed'
+            'activityFeed',
+            'topContributors'
         ));
     }
 }

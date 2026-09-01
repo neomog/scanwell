@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Scan extends Model
 {
@@ -44,19 +45,25 @@ class Scan extends Model
         return $this->belongsTo(Product::class);
     }
 
-    public function markAsCompleted(Product $product): void
+    public function providerLookups(): HasMany
+    {
+        return $this->hasMany(ScanProviderLookup::class);
+    }
+
+    public function markAsCompleted(Product $product, array $metadata = []): void
     {
         $this->update([
             'product_id' => $product->id,
             'status' => 'completed',
+            'scan_metadata' => array_merge($this->scan_metadata ?? [], $metadata),
         ]);
     }
 
-    public function markAsFailed(string $error): void
+    public function markAsFailed(string $error, array $metadata = []): void
     {
         $this->update([
             'status' => 'failed',
-            'scan_metadata' => array_merge($this->scan_metadata ?? [], ['error' => $error]),
+            'scan_metadata' => array_merge($this->scan_metadata ?? [], $metadata, ['error' => $error]),
         ]);
     }
 }

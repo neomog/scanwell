@@ -2,286 +2,463 @@
 
 namespace App\Services;
 
+use App\Contracts\ProductCatalogImportProvider;
+use App\Contracts\ProductCatalogProvider;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\App;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Exception;
 
-class OpenFoodFactsService
+class OpenFoodFactsService implements ProductCatalogImportProvider, ProductCatalogProvider
 {
-    protected string $baseUrl;
-    protected string $beautyUrl;
-    protected int $timeout;
-    protected int $retryAttempts;
     protected bool $verifySsl;
 
     public function __construct()
     {
-        $this->baseUrl = config('services.openfoodfacts.base_url', 'https://world.openfoodfacts.org/api/v2');
-        $this->beautyUrl = config('services.openfoodfacts.beauty_url', 'https://world.openbeautyfacts.org/api/v2');
-        $this->timeout = config('services.openfoodfacts.timeout', 10);
-        $this->retryAttempts = config('services.openfoodfacts.retry_attempts', 3);
         $this->verifySsl = App::environment('production');
     }
 
-    /**
-     * Get product by barcode
-     */
-//    public function getProductByBarcode(string $barcode): ?array
-//    {
-//        // Check cache first
-//        $cacheKey = "openfoodfacts_product_{$barcode}";
-//
-//        return Cache::remember($cacheKey, now()->addDays(7), function () use ($barcode) {
-//            try {
-//
-//                $http = Http::timeout($this->timeout)
-//                    ->retry($this->retryAttempts, 100);
-//
-//                if (!$this->verifySsl) {
-//                    $http = $http->withoutVerifying();
-//                    Log::info('SSL verification disabled for OpenFoodFacts API (development mode)');
-//                }
-//
-//                $response = $http->get("{$this->baseUrl}/product/{$barcode}.json");
-//
-//
-//                if ($response->successful()) {
-//                    $data = $response->json();
-//
-//                    if ($data['status'] === 1) {
-//                        return $this->transformProductData($data['product']);
-//                    }
-//                }
-//
-//                Log::info('Product not found on OpenFoodFacts', ['barcode' => $barcode]);
-//                return null;
-//
-//            } catch (Exception $e) {
-//                Log::error('OpenFoodFacts API error', [
-//                    'barcode' => $barcode,
-//                    'error' => $e->getMessage()
-//                ]);
-//
-//                throw new Exception("Failed to fetch product from OpenFoodFacts: {$e->getMessage()}");
-//            }
-//        });
-//    }
-
-    /**
-     * Get product by barcode - tries multiple product types
-     */
-    public function getProductByBarcode(string $barcode): ?array
+    public function providerKey(): string
     {
-        // Check cache first
-        $cacheKey = "openfoodfacts_product_{$barcode}";
-
-        return Cache::remember($cacheKey, now()->addDays(7), function () use ($barcode) {
-
-            // Try food database first
-            $foodProduct = $this->fetchFromEndpoint($this->baseUrl, $barcode);
-            if ($foodProduct) {
-                $foodProduct['product_type'] = 'food';
-                return $foodProduct;
-            }
-
-            // Try beauty database
-            $beautyProduct = $this->fetchFromEndpoint($this->beautyUrl, $barcode);
-            if ($beautyProduct) {
-                $beautyProduct['product_type'] = 'beauty';
-                return $beautyProduct;
-            }
-
-            // Add more product types as needed:
-            // - pet food: https://world.openpetfoodfacts.org
-            // - product: https://world.openproductfacts.org
-
-            Log::info('Product not found on any OpenFoodFacts database', ['barcode' => $barcode]);
-            return null;
-        });
+        return 'open_facts';
     }
 
-    /**
-     * Fetch product from specific endpoint
-     */
-    protected function fetchFromEndpoint(string $endpoint, string $barcode): ?array
+    public function findByBarcode(string $barcode, array $settings = [], array $credentials = []): ?array
     {
-        try {
-            $http = Http::timeout($this->timeout)
-                ->retry($this->retryAttempts, 100);
+        $resolvedSettings = $this->resolveSettings($settings);
+        $cacheKey = "scanwell:open_facts:product:{$barcode}";
 
-            if (!$this->verifySsl) {
-                $http = $http->withoutVerifying();
-            }
+        return Cache::remember($cacheKey, now()->addMinutes($resolvedSettings['cache_ttl_minutes']), function () use ($barcode, $resolvedSettings) {
+            $candidates = [];
 
-            $response = $http->get("{$endpoint}/product/{$barcode}.json");
+            foreach ($resolvedSettings['sources'] as $source) {
+                $candidate = $this->fetchFromSource($source, $barcode, $resolvedSettings);
 
-            if ($response->successful()) {
-                $data = $response->json();
-
-                // Check if product was found (status 1 means found, 0 means not found)
-                if (($data['status'] ?? 0) === 1) {
-                    return $this->transformProductData($data['product'], $endpoint);
-                } else {
-                    // Log the verbose status for debugging
-                    Log::info('OpenFoodFacts response', [
-                        'barcode' => $barcode,
-                        'status_verbose' => $data['status_verbose'] ?? 'unknown',
-                        'endpoint' => $endpoint
-                    ]);
+                if ($candidate !== null) {
+                    $candidates[] = $candidate;
                 }
             }
 
-            return null;
+            if ($candidates === []) {
+                Log::info('Product not found on configured Open Facts sources', ['barcode' => $barcode]);
 
-        } catch (Exception $e) {
-            Log::error('OpenFoodFacts API error', [
-                'barcode' => $barcode,
-                'endpoint' => $endpoint,
-                'error' => $e->getMessage()
-            ]);
-
-            return null; // Return null instead of throwing, so we can try other endpoints
-        }
-    }
-
-    /**
-     * Search products
-     */
-    public function searchProducts(string $query, int $page = 1, int $pageSize = 20): array
-    {
-        try {
-            $response = Http::timeout($this->timeout)
-                ->retry($this->retryAttempts, 100)
-                ->get("{$this->baseUrl}/search.json", [
-                    'search_terms' => $query,
-                    'page' => $page,
-                    'page_size' => $pageSize,
-                    'json' => 1,
-                ]);
-
-            if ($response->successful()) {
-                $data = $response->json();
-
-                return [
-                    'products' => array_map([$this, 'transformProductData'], $data['products'] ?? []),
-                    'total' => $data['count'] ?? 0,
-                    'page' => $data['page'] ?? $page,
-                    'page_count' => $data['page_count'] ?? 0,
-                ];
+                return null;
             }
 
-            return ['products' => [], 'total' => 0, 'page' => $page, 'page_count' => 0];
+            usort($candidates, function (array $left, array $right): int {
+                return $right['preliminary_score'] <=> $left['preliminary_score'];
+            });
 
-        } catch (Exception $e) {
-            Log::error('OpenFoodFacts search error', [
-                'query' => $query,
-                'error' => $e->getMessage()
+            return $candidates[0];
+        });
+    }
+
+    public function searchProducts(string $query, int $page = 1, int $pageSize = 20, array $settings = [], array $credentials = []): array
+    {
+        $resolvedSettings = $this->resolveSettings($settings);
+        $primarySource = $resolvedSettings['sources'][0] ?? null;
+
+        if ($primarySource === null) {
+            return ['products' => [], 'total' => 0, 'page' => $page, 'page_count' => 0];
+        }
+
+        try {
+            $response = $this->createHttpClient($resolvedSettings)->get("{$primarySource['base_url']}/search", [
+                'search_terms' => $query,
+                'page' => $page,
+                'page_size' => $pageSize,
+                'json' => 1,
             ]);
 
-            throw new Exception("Failed to search products: {$e->getMessage()}");
+            if (!$response->successful()) {
+                return ['products' => [], 'total' => 0, 'page' => $page, 'page_count' => 0];
+            }
+
+            $data = $response->json();
+
+            return [
+                'products' => array_map(
+                    fn (array $product): array => $this->transformProductData($product, $primarySource),
+                    $data['products'] ?? []
+                ),
+                'total' => $data['count'] ?? 0,
+                'page' => $data['page'] ?? $page,
+                'page_count' => $data['page_count'] ?? 0,
+            ];
+        } catch (\Throwable $exception) {
+            Log::error('Open Facts search error', [
+                'query' => $query,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return ['products' => [], 'total' => 0, 'page' => $page, 'page_count' => 0];
         }
     }
 
-    /**
-     * Transform OpenFoodFacts data to our format
-     */
-    protected function transformProductData(array $data, string $endpoint): array
+    protected function fetchFromSource(array $source, string $barcode, array $settings): ?array
     {
-        // Determine product type from endpoint
-        $productType = 'food';
-        if (str_contains($endpoint, 'beauty')) {
-            $productType = 'beauty';
+        try {
+            $response = $this->createHttpClient($settings)->get("{$source['base_url']}/product/{$barcode}.json");
+
+            if (!$response->successful()) {
+                $this->logUnsuccessfulLookup($source, $barcode, $response->status(), $response->json() ?? []);
+
+                return null;
+            }
+
+            $data = $response->json();
+
+            if (($data['status'] ?? 0) !== 1 || !isset($data['product'])) {
+                return null;
+            }
+
+            $productCode = (string) ($data['product']['code'] ?? '');
+
+            if ($productCode !== $barcode) {
+                Log::warning('Discarded non-exact barcode match from Open Facts', [
+                    'requested_barcode' => $barcode,
+                    'returned_barcode' => $productCode,
+                    'source' => $source['key'] ?? 'unknown',
+                ]);
+
+                return null;
+            }
+
+            return $this->transformProductData($data['product'], $source);
+        } catch (\Throwable $exception) {
+            Log::error('Open Facts barcode lookup failed', [
+                'barcode' => $barcode,
+                'source' => $source['key'] ?? 'unknown',
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
         }
+    }
+
+    protected function transformProductData(array $data, array $source): array
+    {
+        $ingredients = $this->extractIngredients($data);
+        $nutrition = $this->extractNutrition($data);
+        $packaging = $this->extractPackaging($data);
+        $name = $this->resolveProductName($data);
 
         return [
-            'barcode' => $data['code'] ?? null,
-            'name' => $data['product_name'] ?? $data['generic_name'] ?? 'Unknown Product',
-            'brand' => $data['brands'] ?? null,
-            'category_id' => $this->determineCategoryId($data, $productType),
-            'image_url' => $data['image_url'] ?? $data['image_front_url'] ?? null,
-            'source' => 'open_food_facts',
-            'product_type' => $productType,
-            'ingredients' => $this->extractIngredients($data),
-            'nutrition' => $this->extractNutrition($data),
+            'barcode' => (string) ($data['code'] ?? ''),
+            'name' => $name,
+            'brand' => $data['brands'] ?? $data['brand_owner'] ?? null,
+            'category_id' => null,
+            'image_url' => $data['image_url'] ?? $data['image_front_url'] ?? $data['image_front_small_url'] ?? null,
+            'page_url' => $this->resolveProductPageUrl((string) ($data['code'] ?? ''), $source),
+            'source' => $source['key'] ?? 'open_facts',
+            'product_type' => $source['family_hint'] ?? 'general',
+            'ingredients' => $ingredients,
+            'nutrition' => $nutrition,
+            'packaging' => $packaging,
+            'warnings' => $this->buildWarnings($ingredients, $nutrition, $packaging),
+            'preliminary_score' => $this->calculatePreliminaryScore($ingredients, $nutrition, $packaging, $data),
             'raw_data' => $data,
         ];
     }
 
-    /**
-     * Extract ingredients from product data
-     */
+    protected function resolveProductName(array $data): string
+    {
+        foreach ([
+            $data['product_name'] ?? null,
+            $data['generic_name'] ?? null,
+            $data['abbreviated_product_name'] ?? null,
+        ] as $candidate) {
+            $value = trim((string) $candidate);
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return 'Unknown Product';
+    }
+
+    protected function createHttpClient(array $settings): PendingRequest
+    {
+        $httpClient = Http::timeout($settings['timeout'])->retry($settings['retry_attempts'], 100);
+
+        return $this->verifySsl ? $httpClient : $httpClient->withoutVerifying();
+    }
+
     protected function extractIngredients(array $data): array
     {
         $ingredients = [];
 
         if (isset($data['ingredients']) && is_array($data['ingredients'])) {
             foreach ($data['ingredients'] as $ingredient) {
+                $name = $ingredient['text'] ?? $ingredient['id'] ?? null;
+
+                if (!$name) {
+                    continue;
+                }
+
                 $ingredients[] = [
-                    'name' => $ingredient['text'] ?? $ingredient['id'] ?? 'Unknown',
+                    'name' => trim((string) $name),
                     'percent' => $ingredient['percent'] ?? null,
                     'vegan' => $ingredient['vegan'] ?? null,
                     'vegetarian' => $ingredient['vegetarian'] ?? null,
+                    'origin' => $ingredient['origin'] ?? null,
                 ];
             }
+        }
+
+        if ($ingredients !== []) {
+            return $ingredients;
+        }
+
+        $ingredientsText = $data['ingredients_text'] ?? $data['ingredients_text_en'] ?? null;
+
+        if (!is_string($ingredientsText) || trim($ingredientsText) === '') {
+            return [];
+        }
+
+        $parts = preg_split('/[,;]+/', $ingredientsText) ?: [];
+
+        foreach ($parts as $part) {
+            $name = trim($part);
+
+            if ($name === '') {
+                continue;
+            }
+
+            $ingredients[] = [
+                'name' => $name,
+                'percent' => null,
+                'vegan' => null,
+                'vegetarian' => null,
+                'origin' => null,
+            ];
         }
 
         return $ingredients;
     }
 
-    /**
-     * Extract nutrition data
-     */
     protected function extractNutrition(array $data): array
     {
         $nutriments = $data['nutriments'] ?? [];
 
         return [
-            'calories' => $nutriments['energy-kcal_100g'] ?? $nutriments['energy_100g'] ?? null,
-            'fat' => $nutriments['fat_100g'] ?? null,
-            'saturated_fat' => $nutriments['saturated-fat_100g'] ?? null,
-            'carbohydrates' => $nutriments['carbohydrates_100g'] ?? null,
-            'fiber' => $nutriments['fiber_100g'] ?? null,
-            'sugars' => $nutriments['sugars_100g'] ?? null,
-            'protein' => $nutriments['proteins_100g'] ?? null,
-            'salt' => $nutriments['salt_100g'] ?? null,
-            'sodium' => $nutriments['sodium_100g'] ?? null,
+            'calories' => $nutriments['energy-kcal_100g'] ?? $nutriments['energy-kcal_100ml'] ?? null,
+            'fat' => $nutriments['fat_100g'] ?? $nutriments['fat_100ml'] ?? null,
+            'saturated_fat' => $nutriments['saturated-fat_100g'] ?? $nutriments['saturated-fat_100ml'] ?? null,
+            'carbohydrates' => $nutriments['carbohydrates_100g'] ?? $nutriments['carbohydrates_100ml'] ?? null,
+            'fiber' => $nutriments['fiber_100g'] ?? $nutriments['fiber_100ml'] ?? null,
+            'sugars' => $nutriments['sugars_100g'] ?? $nutriments['sugars_100ml'] ?? null,
+            'protein' => $nutriments['proteins_100g'] ?? $nutriments['proteins_100ml'] ?? null,
+            'sodium' => $nutriments['sodium_100g'] ?? $nutriments['sodium_100ml'] ?? null,
+            'serving_size' => $data['serving_size'] ?? null,
         ];
     }
 
-    /**
-     * Determine category ID based on product data
-     */
-    protected function determineCategoryId(array $data, string $productType): ?int
+    protected function extractPackaging(array $data): array
     {
-        if ($productType === 'beauty') {
-            // Beauty/cosmetic categories (100+ range)
-            $categories = $data['categories'] ?? '';
+        $description = $data['packaging'] ?? $data['packaging_text'] ?? null;
+        $tags = array_map('strtolower', array_merge(
+            $this->toStringArray($data['packaging_tags'] ?? []),
+            $this->toStringArray($data['packagings_materials_tags'] ?? []),
+            $this->toStringArray($data['packagings'] ?? [])
+        ));
 
-            if (str_contains($categories, 'face')) return 101;
-            if (str_contains($categories, 'body')) return 102;
-            if (str_contains($categories, 'hair')) return 103;
-            if (str_contains($categories, 'makeup')) return 104;
+        $flatDescription = strtolower(is_string($description) ? $description : implode(' ', $this->toStringArray($description)));
+        $searchSpace = trim(implode(' ', array_filter(array_merge($tags, [$flatDescription]))));
 
-            return 100; // Default beauty category
-        } else {
-            // Food categories (1-99 range)
-            $categories = $data['categories'] ?? '';
-            $novaGroup = $data['nova_group'] ?? null;
+        $materials = [];
 
-            if ($novaGroup) {
-                // Ultra-processed foods
-                if ($novaGroup == 4) return 4;
-                // Processed foods
-                if ($novaGroup == 3) return 3;
-                // Processed culinary ingredients
-                if ($novaGroup == 2) return 2;
-                // Unprocessed/minimally processed
-                if ($novaGroup == 1) return 1;
+        if ($searchSpace !== '') {
+            if (str_contains($searchSpace, 'plastic')) {
+                $materials[] = 'plastic';
             }
 
-            return 1; // Default food category
+            if (str_contains($searchSpace, 'glass')) {
+                $materials[] = 'glass';
+            }
+
+            if (str_contains($searchSpace, 'aluminium') || str_contains($searchSpace, 'aluminum') || str_contains($searchSpace, 'metal')) {
+                $materials[] = 'metal';
+            }
+
+            if (str_contains($searchSpace, 'paper') || str_contains($searchSpace, 'cardboard')) {
+                $materials[] = 'paper';
+            }
         }
+
+        return [
+            'description' => $description,
+            'materials' => array_values(array_unique($materials)),
+            'is_plastic' => in_array('plastic', $materials, true),
+        ];
+    }
+
+    protected function buildWarnings(array $ingredients, array $nutrition, array $packaging): array
+    {
+        $warnings = [];
+
+        if ($ingredients === [] && !$this->hasNutritionData($nutrition)) {
+            $warnings[] = 'Vendor returned very limited product details.';
+        }
+
+        if (($packaging['is_plastic'] ?? false) === true) {
+            $warnings[] = 'Plastic packaging detected.';
+        }
+
+        return $warnings;
+    }
+
+    protected function calculatePreliminaryScore(array $ingredients, array $nutrition, array $packaging, array $data): int
+    {
+        $score = 30;
+
+        if ($ingredients !== []) {
+            $score += 25;
+        }
+
+        if ($this->hasNutritionData($nutrition)) {
+            $score += 25;
+        }
+
+        if (!empty($data['product_name'] ?? null)) {
+            $score += 10;
+        }
+
+        if (!empty($data['brands'] ?? null)) {
+            $score += 5;
+        }
+
+        if (!empty($data['image_url'] ?? null) || !empty($data['image_front_url'] ?? null)) {
+            $score += 5;
+        }
+
+        if (!empty($packaging['materials'])) {
+            $score += 5;
+        }
+
+        return min(100, $score);
+    }
+
+    protected function hasNutritionData(array $nutrition): bool
+    {
+        foreach ($nutrition as $value) {
+            if ($value !== null && $value !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function toStringArray(mixed $value): array
+    {
+        if (is_string($value)) {
+            return [$value];
+        }
+
+        if (!is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(function (mixed $item): ?string {
+            if (is_string($item)) {
+                return $item;
+            }
+
+            if (is_array($item)) {
+                return implode(' ', array_filter(array_map(
+                    fn (mixed $nested): ?string => is_string($nested) ? $nested : null,
+                    $item
+                )));
+            }
+
+            return null;
+        }, $value)));
+    }
+
+    protected function resolveSettings(array $settings = []): array
+    {
+        return [
+            'sources' => $this->normalizeSources($settings['sources'] ?? config('scanning.open_food_facts.sources', [])),
+            'timeout' => (int) ($settings['timeout'] ?? config('scanning.open_food_facts.timeout', 10)),
+            'retry_attempts' => (int) ($settings['retry_attempts'] ?? config('scanning.open_food_facts.retry_attempts', 3)),
+            'cache_ttl_minutes' => (int) ($settings['cache_ttl_minutes'] ?? 60 * 24 * 7),
+        ];
+    }
+
+    protected function normalizeSources(array $sources): array
+    {
+        return array_values(array_filter(array_map(function (array $source): ?array {
+            $baseUrl = trim((string) ($source['base_url'] ?? ''));
+
+            if ($baseUrl === '' || !$this->sourceEnabled($source)) {
+                return null;
+            }
+
+            return [
+                'key' => (string) ($source['key'] ?? 'open_facts'),
+                'base_url' => rtrim($baseUrl, '/'),
+                'family_hint' => (string) ($source['family_hint'] ?? 'general'),
+                'enabled' => true,
+            ];
+        }, $sources)));
+    }
+
+    protected function sourceEnabled(array $source): bool
+    {
+        if (!array_key_exists('enabled', $source)) {
+            return true;
+        }
+
+        return filter_var($source['enabled'], FILTER_VALIDATE_BOOL);
+    }
+
+    protected function logUnsuccessfulLookup(array $source, string $barcode, int $status, array $payload): void
+    {
+        $statusVerbose = strtolower((string) ($payload['status_verbose'] ?? ''));
+        $sourceKey = $source['key'] ?? 'unknown';
+
+        if ($status === 404 && str_contains($statusVerbose, 'different product type')) {
+            Log::info('Open Facts source skipped due to product family mismatch', [
+                'barcode' => $barcode,
+                'source' => $sourceKey,
+                'status' => $status,
+                'status_verbose' => $payload['status_verbose'] ?? null,
+            ]);
+
+            return;
+        }
+
+        Log::warning('Open Facts source lookup returned non-success status', [
+            'barcode' => $barcode,
+            'source' => $sourceKey,
+            'status' => $status,
+            'status_verbose' => $payload['status_verbose'] ?? null,
+        ]);
+    }
+
+    protected function resolveProductPageUrl(string $barcode, array $source): ?string
+    {
+        $barcode = trim($barcode);
+
+        if ($barcode === '') {
+            return null;
+        }
+
+        $baseUrl = trim((string) ($source['base_url'] ?? ''));
+
+        if ($baseUrl === '') {
+            return null;
+        }
+
+        $publicBaseUrl = preg_replace('#/api(?:/v\d+)?/?$#i', '', rtrim($baseUrl, '/'));
+
+        if (!is_string($publicBaseUrl) || $publicBaseUrl === '') {
+            return null;
+        }
+
+        return $publicBaseUrl . '/product/' . rawurlencode($barcode);
     }
 }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -27,5 +28,12 @@ class RegistrationTest extends TestCase
 
         $this->assertAuthenticated();
         $response->assertRedirect(route('dashboard', absolute: false));
+
+        $user = User::where('email', 'test@example.com')->firstOrFail();
+        $subscription = $user->subscriptions()->with(['plan', 'price'])->current()->first();
+
+        $this->assertNotNull($subscription);
+        $this->assertSame('free', $subscription->plan->slug);
+        $this->assertSame(0, $subscription->amount);
     }
 }

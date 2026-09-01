@@ -7,8 +7,6 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
-use App\Http\Middleware\WebAuth;
-
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -18,10 +16,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-//        'web.auth' => \App\Http\Middleware\WebAuth::class
         $middleware->alias([
-            'web.auth' => WebAuth::class,
             'admin' => \App\Http\Middleware\AdminMiddleware::class,
+            'plan.feature' => \App\Http\Middleware\EnsurePlanFeature::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

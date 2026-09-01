@@ -39,6 +39,45 @@ class UserPreference extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function isAllergicTo(string $ingredient): bool
+    {
+        return in_array(
+            strtolower($ingredient),
+            array_map('strtolower', $this->allergies ?? []),
+            true
+        );
+    }
+
+    public function avoidsIngredient(string $ingredient): bool
+    {
+        return in_array(
+            strtolower($ingredient),
+            array_map('strtolower', $this->avoid_ingredients ?? []),
+            true
+        );
+    }
+
+    public function getPersonalizedWarnings(Product $product): array
+    {
+        $warnings = [];
+
+        foreach ($product->ingredients ?? [] as $ingredient) {
+            if (!isset($ingredient->name) || !is_string($ingredient->name)) {
+                continue;
+            }
+
+            if ($this->isAllergicTo($ingredient->name)) {
+                $warnings[] = "Contains {$ingredient->name} which you're allergic to";
+            }
+
+            if ($this->avoidsIngredient($ingredient->name)) {
+                $warnings[] = "Contains {$ingredient->name} which you prefer to avoid";
+            }
+        }
+
+        return $warnings;
+    }
 }
 //
 //namespace App\Models;

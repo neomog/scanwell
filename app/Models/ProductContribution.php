@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ProductContribution extends Model
 {
@@ -20,13 +21,19 @@ class ProductContribution extends Model
         'user_id',
         'product_id',
         'change_type',
+        'field_name',
         'old_data',
         'new_data',
+        'moderated_data',
         'reason',
         'evidence',
         'status',
         'reviewed_by_admin',
         'review_notes',
+        'flag_reason',
+        'flagged_at',
+        'reputation_points_awarded',
+        'meta',
         'reviewed_at',
         'barcode',
         'product_name',
@@ -35,7 +42,10 @@ class ProductContribution extends Model
     protected $casts = [
         'old_data' => 'array',
         'new_data' => 'array',
+        'moderated_data' => 'array',
         'evidence' => 'array',
+        'meta' => 'array',
+        'flagged_at' => 'datetime',
         'reviewed_at' => 'datetime',
     ];
 
@@ -54,6 +64,11 @@ class ProductContribution extends Model
         return $this->belongsTo(User::class, 'reviewed_by_admin');
     }
 
+    public function auditLogs(): HasMany
+    {
+        return $this->hasMany(ProductAuditLog::class, 'contribution_id');
+    }
+
     public function approve(User $admin, ?string $notes = null): void
     {
         $this->update([
@@ -62,11 +77,6 @@ class ProductContribution extends Model
             'review_notes' => $notes,
             'reviewed_at' => now(),
         ]);
-
-        // Apply the changes to the product if it exists
-        if ($this->product && $this->change_type === 'update') {
-            $this->product->update($this->new_data);
-        }
     }
 
     public function reject(User $admin, string $reason): void
@@ -93,5 +103,22 @@ class ProductContribution extends Model
     public function isPending(): bool
     {
         return $this->status === 'pending';
+    }
+
+    public function isEditableByUser(): bool
+    {
+        return in_array($this->status, ['pending', 'changes_requested'], true);
+    }
+
+    public function flag(User $admin, string $reason): void
+    {
+        $this->update([
+            'status' => 'flagged',
+            'reviewed_by_admin' => $admin->id,
+            'review_notes' => $reason,
+            'flag_reason' => $reason,
+            'flagged_at' => now(),
+            'reviewed_at' => now(),
+        ]);
     }
 }

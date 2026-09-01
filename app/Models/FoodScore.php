@@ -45,6 +45,29 @@ class FoodScore extends Model
     {
         return $this->belongsTo(Product::class, 'product_id');
     }
+
+    public function getGradeAttribute(): string
+    {
+        return match (true) {
+            $this->overall_score >= 90 => 'A+',
+            $this->overall_score >= 80 => 'A',
+            $this->overall_score >= 70 => 'B+',
+            $this->overall_score >= 60 => 'B',
+            $this->overall_score >= 50 => 'C',
+            $this->overall_score >= 40 => 'D',
+            default => 'F',
+        };
+    }
+
+    public function getScoreColorAttribute(): string
+    {
+        return match (true) {
+            $this->overall_score >= 70 => 'green',
+            $this->overall_score >= 50 => 'yellow',
+            $this->overall_score >= 30 => 'orange',
+            default => 'red',
+        };
+    }
 }
 //
 //namespace App\Models;

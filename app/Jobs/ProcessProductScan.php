@@ -27,10 +27,18 @@ class ProcessProductScan implements ShouldQueue
         try {
             $product = $analysisService->analyzeByBarcode(
                 $this->scan->barcode,
-                $this->scan->user_id
+                $this->scan->user_id,
+                $this->scan
             );
 
-            $this->scan->markAsCompleted($product);
+            $lookupSummary = $analysisService->lastLookupSummary();
+
+            $this->scan->markAsCompleted($product, [
+                'matched_provider' => data_get($product->raw_data, '_scanwell.source'),
+                'product_family' => $product->product_family,
+                'confidence' => data_get($product->raw_data, '_scanwell.confidence'),
+                'provider_lookup' => $lookupSummary,
+            ]);
 
             Log::info('Scan processed successfully', [
                 'scan_id' => $this->scan->id,
@@ -38,7 +46,9 @@ class ProcessProductScan implements ShouldQueue
             ]);
 
         } catch (\Exception $e) {
-            $this->scan->markAsFailed($e->getMessage());
+            $this->scan->markAsFailed($e->getMessage(), [
+                'provider_lookup' => $analysisService->lastLookupSummary(),
+            ]);
 
             Log::error('Failed to process scan', [
                 'scan_id' => $this->scan->id,
